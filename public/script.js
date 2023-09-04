@@ -98,8 +98,8 @@ import {
     loadNovelPreset,
     loadNovelSettings,
     nai_settings,
-    setNovelData,
     adjustNovelInstructionPrompt,
+    loadNovelSubscriptionData,
 } from "./scripts/nai-settings.js";
 
 import {
@@ -285,6 +285,7 @@ export const event_types = {
     CHARACTER_EDITED: 'character_edited',
     USER_MESSAGE_RENDERED: 'user_message_rendered',
     CHARACTER_MESSAGE_RENDERED: 'character_message_rendered',
+    FORCE_SET_BACKGROUND: 'force_set_background,'
 }
 
 export const eventSource = new EventEmitter();
@@ -634,7 +635,7 @@ let online_status = "no_connection";
 let api_server = "";
 let api_server_textgenerationwebui = "";
 //var interval_timer = setInterval(getStatus, 2000);
-let interval_timer_novel = setInterval(getStatusNovel, 90000);
+//let interval_timer_novel = setInterval(getStatusNovel, 90000);
 let is_get_status = false;
 let is_get_status_novel = false;
 let is_api_button_press = false;
@@ -3586,7 +3587,7 @@ function promptItemize(itemizedPrompts, requestedMesId) {
         var oaiStartTokens = itemizedPrompts[thisPromptSet].oaiStartTokens;
         var ActualChatHistoryTokens = itemizedPrompts[thisPromptSet].oaiConversationTokens;
         var examplesStringTokens = itemizedPrompts[thisPromptSet].oaiExamplesTokens;
-        var oaiPromptTokens = itemizedPrompts[thisPromptSet].oaiPromptTokens - worldInfoStringTokens - afterScenarioAnchorTokens + examplesStringTokens;
+        var oaiPromptTokens = itemizedPrompts[thisPromptSet].oaiPromptTokens - afterScenarioAnchorTokens + examplesStringTokens;
         var oaiBiasTokens = itemizedPrompts[thisPromptSet].oaiBiasTokens;
         var oaiJailbreakTokens = itemizedPrompts[thisPromptSet].oaiJailbreakTokens;
         var oaiNudgeTokens = itemizedPrompts[thisPromptSet].oaiNudgeTokens;
@@ -5348,32 +5349,19 @@ export async function displayPastChats() {
 //************************************************************
 async function getStatusNovel() {
     if (is_get_status_novel) {
-        const data = {};
+        try {
+            const result = await loadNovelSubscriptionData();
 
-        jQuery.ajax({
-            type: "POST", //
-            url: "/getstatus_novelai", //
-            data: JSON.stringify(data),
-            beforeSend: function () {
+            if (!result) {
+                throw new Error('Could not load subscription data');
+            }
 
-            },
-            cache: false,
-            dataType: "json",
-            contentType: "application/json",
-            success: function (data) {
-                if (data.error != true) {
-                    setNovelData(data);
-                    online_status = `${getNovelTier(data.tier)}`;
-                }
-                resultCheckStatusNovel();
-            },
-            error: function (jqXHR, exception) {
-                online_status = "no_connection";
-                console.log(exception);
-                console.log(jqXHR);
-                resultCheckStatusNovel();
-            },
-        });
+            online_status = getNovelTier();
+        } catch {
+            online_status = "no_connection";
+        }
+
+        resultCheckStatusNovel();
     } else {
         if (is_get_status != true && is_get_status_openai != true) {
             online_status = "no_connection";
@@ -6769,6 +6757,22 @@ function connectAPISlash(_, text) {
     }
 
     toastr.info(`API set to ${text}, trying to connect..`);
+}
+
+export function processDroppedFiles(files) {
+    const allowedMimeTypes = [
+        'application/json',
+        'image/png',
+        'image/webp',
+    ];
+
+    for (const file of files) {
+        if (allowedMimeTypes.includes(file.type)) {
+            importCharacter(file);
+        } else {
+            toastr.warning('Unsupported file type: ' + file.name);
+        }
+    }
 }
 
 function importCharacter(file) {
@@ -8816,21 +8820,6 @@ jQuery(async function () {
         processDroppedFiles(files);
     });
 
-    function processDroppedFiles(files) {
-        const allowedMimeTypes = [
-            'application/json',
-            'image/png',
-            'image/webp',
-        ];
-
-        for (const file of files) {
-            if (allowedMimeTypes.includes(file.type)) {
-                importCharacter(file);
-            } else {
-                toastr.warning('Unsupported file type: ' + file.name);
-            }
-        }
-    }
 
     $("#charListGridToggle").on('click', async () => {
         doCharListDisplaySwitch();
