@@ -3490,6 +3490,16 @@ a {
     border-top: 3px dotted var(--SmartThemeQuoteColor) !important;
 }
 
+#ARA-sheet {
+    font-family: monospace;
+    font-size: calc(var(--mainFontSize) + 0.3rem);
+}
+
+#ara-panel {
+    overflow-y: auto;
+}
+
+
 .icon-svg {
     fill: currentColor;
     /* Takes on the color of the surrounding text */
@@ -3606,6 +3616,6 @@ a {
         display: block;
         width: 100vw;
         height: 100vh;
-        z-index: 9999;        
+        z-index: 9999;
     }
 }

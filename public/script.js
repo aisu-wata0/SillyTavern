@@ -3051,12 +3051,14 @@ async function Generate(type, { automatic_trigger, force_name2, resolve, reject,
             itemizedPrompts.push(thisPromptBits);
             console.log(`pushed prompt bits to itemizedPrompts array. Length is now: ${itemizedPrompts.length}`);
 
+            try {
+
             if (main_api == 'openai') {
                 if (isStreamingEnabled() && type !== 'quiet') {
-                    streamingProcessor.generator = await sendOpenAIRequest(type, generate_data.prompt, streamingProcessor.abortController.signal);
+                    streamingProcessor.generator = await sendOpenAIRequest(type, generate_data.prompt, streamingProcessor.abortController.signal, characters[this_chid].chat);
                 }
                 else {
-                    sendOpenAIRequest(type, generate_data.prompt, abortController.signal).then(onSuccess).catch(onError);
+                    sendOpenAIRequest(type, generate_data.prompt, abortController.signal, characters[this_chid].chat).then(onSuccess).catch(onError);
                 }
             }
             else if (main_api == 'koboldhorde') {
@@ -3091,6 +3093,10 @@ async function Generate(type, { automatic_trigger, force_name2, resolve, reject,
                 } catch (error) {
                     onError(error);
                 }
+            }
+
+            } catch (error) {
+                onError(null, error)
             }
 
             if (isStreamingEnabled() && type !== 'quiet') {

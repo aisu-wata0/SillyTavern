@@ -150,6 +150,7 @@ let power_user = {
     send_on_enter: send_on_enter_options.AUTO,
     console_log_prompts: false,
     render_formulas: false,
+
     allow_name1_display: false,
     allow_name2_display: false,
     //removeXML: false,
@@ -158,6 +159,9 @@ let power_user = {
     timestamps_enabled: true,
     timestamp_model_icon: false,
     mesIDDisplay_enabled: false,
+
+    absoluteRPGAdventure: false,
+
     max_context_unlocked: false,
     message_token_count_enabled: false,
     prefer_character_prompt: true,
@@ -898,6 +902,9 @@ function loadPowerUserSettings(settings, data) {
 
     $(`#character_sort_order option[data-order="${power_user.sort_order}"][data-field="${power_user.sort_field}"]`).prop("selected", true);
     reloadMarkdownProcessor(power_user.render_formulas);
+
+    $("#absoluteRPGAdventure").prop("checked", power_user.absoluteRPGAdventure);
+
     loadInstructMode(data);
     loadContextSettings();
     loadMaxContextUnlocked();
@@ -2132,6 +2139,11 @@ $(document).ready(() => {
         power_user.hotswap_enabled = value;
         localStorage.setItem(storage_keys.hotswap_enabled, String(power_user.hotswap_enabled));
         switchHotswap();
+    });
+
+    $("#absoluteRPGAdventure").on('input', function () {
+        power_user.absoluteRPGAdventure = !!$(this).prop('checked');
+        saveSettingsDebounced();
     });
 
     $("#prefer_character_prompt").on("input", function () {

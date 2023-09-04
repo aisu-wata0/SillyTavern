@@ -1697,6 +1697,99 @@
             </div>
         </div>
 
+        <div id="ara-show-button" class="drawer">
+            <div class="drawer-toggle drawer-header">
+                <div id="AraDrawerIcon" class="drawer-icon fa-solid  fa-address-card  closedIcon" title="ARA Sheet"></div>
+            </div>
+
+            <div id="ara-panel" class="drawer-content fillLeft closedDrawer">
+                <div id="ara-panelheader" class="fa-solid fa-grip drag-grabber"></div>
+                <div id="ARA_button_panel_pin_div" title="Locked = ARA panel will stay open">
+                    <input type="checkbox" id="ARA_button_panel_pin">
+                    <label for="ARA_button_panel_pin">
+                        <i class="unchecked fa-solid fa-lock-open " style="display: none;"></i>
+                        <i class="checked fa-solid fa-lock "></i>
+                    </label>
+                </div>
+
+                <div id="ARA-config" class="width100p">
+                    <div class="ARA-drawer_toggler" style=" display: inline-flex; align-items: center;">
+                        <h3 style="margin-top: auto; margin-bottom: auto;">Config</h3>
+                        &nbsp;
+                        <i class="fa-solid inline-drawer-icon down fa-circle-chevron-down" style="display: inline-block;"></i>
+                        <i class="fa-solid inline-drawer-icon up fa-circle-chevron-up" style="display: none;"></i>
+                    </div>
+
+                    <div style="display: none;">
+                        <div  style="display: flex;">
+                            <div id="ARA_button_config_reset" title="Reset config">
+                                <i class="fa-lg fa-solid fa-repeat"></i>
+                            </div>
+                            &nbsp;
+                            <span id="ARA_button_config_reset_text">Reset config</span>&nbsp;<small> (you need to then confirm, or reload to undo) (resizable)</small>
+                        </div>
+                        <div id="ARA-config_text" contenteditable="true"></div>
+
+                        <div style="display: flex;">
+                            <i id="ARA_config_send" class="fa-solid fa-feather-pointed" title="Send config" style="display: flex;"></i>
+                            <div id="ARA_config_waiting" style="display: none;"><i title="Waiting" class="fa-solid fa-hourglass-half"></i></div>
+                            &nbsp;
+                            <span id="ARA_button_config_confirm"> Confirm config</span><span id="ARA_button_config_error"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="ARA-summary" class="width100p">
+                    <div class="ARA-drawer_toggler" style=" display: inline-flex; align-items: center;">
+                        <h3 style="margin-top: auto; margin-bottom: auto;">Summary</h3>
+                        &nbsp;
+                        <i class="fa-solid inline-drawer-icon down fa-circle-chevron-down" style="display: inline-block;"></i>
+                        <i class="fa-solid inline-drawer-icon up fa-circle-chevron-up" style="display: none;"></i>
+                    </div>
+
+                    <div style="display: none;">
+                        <div style="
+                            display: inline-flex;
+                            align-items: baseline;
+                        ">
+                            <select id="ARA-summary-chat_id-select" style="width: auto;">
+                            </select>
+
+                            <select id="ARA-summary-idxEndGlobal-select" style="width: auto;">
+                            </select>
+
+                            <div id="ARA-summary-idxEndGlobal_last"></div>
+                            <h4 id="ARA-summary_title" style="margin-left: 0.4em;"></h4>
+                        </div>
+
+                        <div id="ARA_button_summary_regenerate" title="Regenerate summary">
+                            <i class="fa-lg fa-solid fa-repeat"></i>
+                            <span id="ARA_button_summary_regenerate_text">Regenerate summary</span>
+                        </div>
+
+                        <textarea id="ARA-summary_text"></textarea>
+
+                        <div style="display: flex;" title="Preemptive summary means you generate one summary ahead, so the second to last summary is the one used in swipes, so don't forget to edit that one.">
+                            <i id="ARA_summary_send" class="fa-solid fa-feather-pointed" title="Send summary" style="display: flex;"></i>
+                            <i title="Waiting" class="fa-solid fa-hourglass-half" id="ARA_summary_waiting" style="display: none;"></i>
+                            &nbsp;
+                            Set summary&nbsp;<small> (used on next swipe and way later, careful with preemptive, hover mouse)  (resizable)</small>
+                        </div>
+                    </div>
+                </div>
+
+                <br/>
+                <div>
+                    <h3 style="margin-top: auto; margin-bottom: auto;">Stat Sheet</h3>
+                    <div class="flex-container">
+                        <div id="ARA-sheet" class="width100p">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
         <div id="sys-settings-button" class="drawer">
             <div class="drawer-toggle drawer-header">
                 <div id="API-status-top" class="drawer-icon fa-solid fa-plug-circle-exclamation  closedIcon" title="API Connections" data-i18n="[title]API Connections"></div>
@@ -3085,6 +3178,22 @@
                                         <div data-i18n="Blacklisted word count to swipe">Blacklisted word count to swipe</div>
                                         <input id="auto_swipe_blacklist_threshold" name="auto_swipe_blacklist_threshold" type="number" min="0" step="1" value="1" class="text_pole">
                                     </div>
+                                </div>
+
+                                <h4>
+                                    Absolute RPG Adventure
+                                </h4>
+                                <label for="absoluteRPGAdventure">
+                                    <input id="absoluteRPGAdventure" type="checkbox" />
+                                    Enable
+                                </label>
+
+                                <div>
+                                    <a href="" id="ARAauthURI">Login</a>
+                                </div>
+                                <div>
+                                    <label for="absoluteRPGAdventureToken">Logged in:</label>
+                                    <label id="absoluteRPGAdventureLoggedIn">false</label>
                                 </div>
                             </div>
 
