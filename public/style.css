@@ -1815,9 +1815,8 @@ grammarly-extension {
 }
 
 .wide_dialogue_popup {
-    max-width: 90vh !important;
-    max-width: 90svh !important;
-    width: fit-content !important;
+    aspect-ratio: 1 / 1;
+    width: unset !important;
 }
 
 #dialogue_popup_holder {
@@ -2769,6 +2768,7 @@ body .ui-widget-content li:hover {
     margin: 10px;
     opacity: 0.85;
     text-shadow: 0px 0px calc(var(--shadowWidth) * 1px) var(--SmartThemeShadowColor);
+    order: 9999;
 }
 
 .typing_indicator:after {
@@ -3612,6 +3612,7 @@ a {
         height: 100vh;
         z-index: 9999;
     }
+
     .draggable {
         display: block;
         width: 100vw;
