@@ -13,7 +13,7 @@ ENTRYPOINT [ "tini", "--" ]
 WORKDIR ${APP_HOME}
 
 # Install app dependencies
-COPY package*.json ./
+COPY package*.json post-install.js ./
 RUN \
   echo "*** Install npm packages ***" && \
   npm install && npm cache clean --force
@@ -23,7 +23,7 @@ COPY . ./
 
 # Copy default chats, characters and user avatars to <folder>.default folder
 RUN \
-  IFS="," RESOURCES="characters,chats,groups,group chats,User Avatars,worlds" && \
+  IFS="," RESOURCES="characters,chats,groups,group chats,User Avatars,worlds,OpenAI Settings,NovelAI Settings,KoboldAI Settings,TextGen Settings" && \
   \
   echo "*** Store default $RESOURCES in <folder>.default ***" && \
   for R in $RESOURCES; do mv "public/$R" "public/$R.default"; done && \

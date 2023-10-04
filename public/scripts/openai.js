@@ -24,6 +24,7 @@ import {
     eventSource,
     event_types,
     substituteParams,
+    MAX_INJECTION_DEPTH,
 } from "../script.js";
 import { groups, selected_group } from "./group-chats.js";
 
@@ -45,7 +46,6 @@ import {
 } from "./secrets.js";
 
 import {
-    deepClone,
     delay,
     download,
     getFileText, getSortableDelay,
@@ -123,6 +123,34 @@ const j2_max_pres = 5.0;
 const openrouter_website_model = 'OR_Website';
 const openai_max_stop_strings = 4;
 
+const textCompletionModels = [
+    "gpt-3.5-turbo-instruct",
+    "gpt-3.5-turbo-instruct-0914",
+    "text-davinci-003",
+    "text-davinci-002",
+    "text-davinci-001",
+    "text-curie-001",
+    "text-babbage-001",
+    "text-ada-001",
+    "code-davinci-002",
+    "code-davinci-001",
+    "code-cushman-002",
+    "code-cushman-001",
+    "text-davinci-edit-001",
+    "code-davinci-edit-001",
+    "text-embedding-ada-002",
+    "text-similarity-davinci-001",
+    "text-similarity-curie-001",
+    "text-similarity-babbage-001",
+    "text-similarity-ada-001",
+    "text-search-davinci-doc-001",
+    "text-search-curie-doc-001",
+    "text-search-babbage-doc-001",
+    "text-search-ada-doc-001",
+    "code-search-babbage-code-001",
+    "code-search-ada-code-001",
+];
+
 let biasCache = undefined;
 let model_list = [];
 
@@ -133,6 +161,7 @@ export const chat_completion_sources = {
     SCALE: 'scale',
     OPENROUTER: 'openrouter',
     AI21: 'ai21',
+    PALM: 'palm',
 };
 
 const prefixMap = selected_group ? {
@@ -294,7 +323,7 @@ function setOpenAIMessages(chat) {
     }
 
     // Add chat injections, 100 = maximum depth of injection. (Why would you ever need more?)
-    for (let i = 100; i >= 0; i--) {
+    for (let i = MAX_INJECTION_DEPTH; i >= 0; i--) {
         const anchor = getExtensionPrompt(extension_prompt_types.IN_CHAT, i);
 
         if (anchor && anchor.length) {
@@ -353,7 +382,7 @@ function setupChatCompletionPromptManager(openAiSettings) {
     promptManager.tryGenerate = () => {
         if (characters[this_chid]) {
             return Generate('normal', {}, true);
-        } else{
+        } else {
             return Promise.resolve();
         }
     }
@@ -460,7 +489,7 @@ function populateChatHistory(prompts, chatCompletion, type = null, cyclePrompt =
     // Reserve budget for group nudge
     let groupNudgeMessage = null;
     if (selected_group) {
-        const groupNudgeMessage = Message.fromPrompt(prompts.get('groupNudge'));
+        groupNudgeMessage = Message.fromPrompt(prompts.get('groupNudge'));
         chatCompletion.reserveBudget(groupNudgeMessage);
     }
 
@@ -554,6 +583,22 @@ function populateDialogueExamples(prompts, chatCompletion) {
 }
 
 /**
+ * @param {number} position - Prompt position in the extensions object.
+ * @returns {string|false} - The prompt position for prompt collection.
+ */
+function getPromptPosition(position) {
+    if (position == extension_prompt_types.BEFORE_PROMPT) {
+        return 'start';
+    }
+
+    if (position == extension_prompt_types.IN_PROMPT) {
+        return 'end';
+    }
+
+    return false;
+}
+
+/**
  * Populate a chat conversation by adding prompts to the conversation and managing system and user prompts.
  *
  * @param {PromptCollection} prompts - PromptCollection containing all prompts where the key is the prompt identifier and the value is the prompt object.
@@ -576,6 +621,7 @@ function populateChatCompletion(prompts, chatCompletion, { bias, quietPrompt, ty
         chatCompletion.add(collection, index);
     };
 
+    chatCompletion.reserveBudget(3); // every reply is primed with <|start|>assistant<|message|>
     // Character and world information
     addToChatCompletion('worldInfoBefore');
     addToChatCompletion('main');
@@ -616,17 +662,39 @@ function populateChatCompletion(prompts, chatCompletion, { bias, quietPrompt, ty
     if (bias && bias.trim().length) addToChatCompletion('bias');
 
     // Tavern Extras - Summary
-    if (prompts.has('summary')) chatCompletion.insert(Message.fromPrompt(prompts.get('summary')), 'main');
+    if (prompts.has('summary')) {
+        const summary = prompts.get('summary');
+
+        if (summary.position) {
+            chatCompletion.insert(Message.fromPrompt(summary), 'main', summary.position);
+        }
+    }
 
     // Authors Note
     if (prompts.has('authorsNote')) {
-        const authorsNote = Message.fromPrompt(prompts.get('authorsNote'));
+        const authorsNote = prompts.get('authorsNote');
 
-        // ToDo: Ideally this should not be retrieved here but already be referenced in some configuration object
-        const afterScenario = document.querySelector('input[name="extension_floating_position"]').checked;
+        if (authorsNote.position) {
+            chatCompletion.insert(Message.fromPrompt(authorsNote), 'main', authorsNote.position);
+        }
+    }
 
-        // Add authors notes
-        if (true === afterScenario) chatCompletion.insert(authorsNote, 'scenario');
+    // Vectors Memory
+    if (prompts.has('vectorsMemory')) {
+        const vectorsMemory = prompts.get('vectorsMemory');
+
+        if (vectorsMemory.position) {
+            chatCompletion.insert(Message.fromPrompt(vectorsMemory), 'main', vectorsMemory.position);
+        }
+    }
+
+    // Smart Context (ChromaDB)
+    if (prompts.has('smartContext')) {
+        const smartContext = prompts.get('smartContext');
+
+        if (smartContext.position) {
+            chatCompletion.insert(Message.fromPrompt(smartContext), 'main', smartContext.position);
+        }
     }
 
     // Decide whether dialogue examples should always be added
@@ -659,7 +727,7 @@ function populateChatCompletion(prompts, chatCompletion, { bias, quietPrompt, ty
  * @param {string} personaDescription
  * @returns {Object} prompts - The prepared and merged system and user-defined prompts.
  */
-function preparePromptsForChatCompletion({Scenario, charPersonality, name2, worldInfoBefore, worldInfoAfter, charDescription, quietPrompt, bias, extensionPrompts, systemPromptOverride, jailbreakPromptOverride, personaDescription} = {}) {
+function preparePromptsForChatCompletion({ Scenario, charPersonality, name2, worldInfoBefore, worldInfoAfter, charDescription, quietPrompt, bias, extensionPrompts, systemPromptOverride, jailbreakPromptOverride, personaDescription } = {}) {
     const scenarioText = Scenario ? `[Circumstances and context of the dialogue: ${Scenario}]` : '';
     const charPersonalityText = charPersonality ? `[${name2}'s personality: ${charPersonality}]` : ''
     const groupNudge = `[Write the next reply only as ${name2}]`;
@@ -685,7 +753,8 @@ function preparePromptsForChatCompletion({Scenario, charPersonality, name2, worl
     if (summary && summary.value) systemPrompts.push({
         role: 'system',
         content: summary.value,
-        identifier: 'summary'
+        identifier: 'summary',
+        position: getPromptPosition(summary.position),
     });
 
     // Authors Note
@@ -693,7 +762,26 @@ function preparePromptsForChatCompletion({Scenario, charPersonality, name2, worl
     if (authorsNote && authorsNote.value) systemPrompts.push({
         role: 'system',
         content: authorsNote.value,
-        identifier: 'authorsNote'
+        identifier: 'authorsNote',
+        position: getPromptPosition(authorsNote.position),
+    });
+
+    // Vectors Memory
+    const vectorsMemory = extensionPrompts['3_vectors'];
+    if (vectorsMemory && vectorsMemory.value) systemPrompts.push({
+        role: 'system',
+        content: vectorsMemory.value,
+        identifier: 'vectorsMemory',
+        position: getPromptPosition(vectorsMemory.position),
+    });
+
+    // Smart Context (ChromaDB)
+    const smartContext = extensionPrompts['chromadb'];
+    if (smartContext && smartContext.value) systemPrompts.push({
+        role: 'system',
+        content: smartContext.value,
+        identifier: 'smartContext',
+        position: getPromptPosition(smartContext.position),
     });
 
     // Persona Description
@@ -795,7 +883,8 @@ function prepareOpenAIMessages({
             extensionPrompts,
             systemPromptOverride,
             jailbreakPromptOverride,
-            personaDescription});
+            personaDescription
+        });
 
         // Fill the chat completion with as much context as the budget allows
         populateChatCompletion(prompts, chatCompletion, { bias, quietPrompt, type, cyclePrompt });
@@ -1890,6 +1979,8 @@ function getChatCompletionModel() {
             return oai_settings.windowai_model;
         case chat_completion_sources.SCALE:
             return '';
+        case chat_completion_sources.PALM:
+            return '';
         case chat_completion_sources.OPENROUTER:
             return oai_settings.openrouter_model !== openrouter_website_model ? oai_settings.openrouter_model : null;
         case chat_completion_sources.AI21:
@@ -2017,16 +2108,18 @@ async function sendOpenAIRequest(type, openai_msgs_tosend, signal, chat_id) {
     const isOpenRouter = oai_settings.chat_completion_source == chat_completion_sources.OPENROUTER;
     const isScale = oai_settings.chat_completion_source == chat_completion_sources.SCALE;
     const isAI21 = oai_settings.chat_completion_source == chat_completion_sources.AI21;
-    const isTextCompletion = oai_settings.chat_completion_source == chat_completion_sources.OPENAI && (oai_settings.openai_model.startsWith('text-') || oai_settings.openai_model.startsWith('code-'));
+    const isPalm = oai_settings.chat_completion_source == chat_completion_sources.PALM;
+    const isTextCompletion = oai_settings.chat_completion_source == chat_completion_sources.OPENAI && textCompletionModels.includes(oai_settings.openai_model);
     const isQuiet = type === 'quiet';
-    const stream = oai_settings.stream_openai && !isQuiet && !isScale && !isAI21;
+    const isImpersonate = type === 'impersonate';
+    const stream = oai_settings.stream_openai && !isQuiet && !isScale && !isAI21 && !isPalm;
 
-    if (isAI21) {
+    if (isAI21 || isPalm) {
         const joinedMsgs = openai_msgs_tosend.reduce((acc, obj) => {
             const prefix = prefixMap[obj.role];
             return acc + (prefix ? (selected_group ? "\n" : prefix + " ") : "") + obj.content + "\n";
         }, "");
-        openai_msgs_tosend = substituteParams(joinedMsgs);
+        openai_msgs_tosend = substituteParams(joinedMsgs) + (isImpersonate ? `${name1}:` : `${name2}:`);
     }
 
     // If we're using the window.ai extension, use that instead
@@ -2089,6 +2182,14 @@ async function sendOpenAIRequest(type, openai_msgs_tosend, signal, chat_id) {
     if (isScale) {
         generate_data['use_scale'] = true;
         generate_data['api_url_scale'] = oai_settings.api_url_scale;
+    }
+
+    if (isPalm) {
+        const nameStopString = isImpersonate ? `\n${name2}:` : `\n${name1}:`;
+        const stopStringsLimit = 3; // 5 - 2 (nameStopString and new_chat_prompt)
+        generate_data['use_palm'] = true;
+        generate_data['top_k'] = Number(oai_settings.top_k_openai);
+        generate_data['stop'] = [nameStopString, oai_settings.new_chat_prompt, ...getCustomStoppingStrings(stopStringsLimit)];
     }
 
     if (isAI21) {
@@ -2712,9 +2813,12 @@ class ChatCompletion {
     /**
      * Reserves the tokens required by the given message from the token budget.
      *
-     * @param {Message|MessageCollection} message - The message whose tokens to reserve.
+     * @param {Message|MessageCollection|number} message - The message whose tokens to reserve.
      */
-    reserveBudget(message) { this.decreaseTokenBudgetBy(message.getTokens()) };
+    reserveBudget(message) {
+        const tokens = typeof message === 'number' ? message : message.getTokens();
+        this.decreaseTokenBudgetBy(tokens);
+    };
 
     /**
      * Frees up the tokens used by the given message from the token budget.
@@ -2913,7 +3017,8 @@ async function getStatusOpen() {
             return resultCheckStatusOpen();
         }
 
-        if (oai_settings.chat_completion_source == chat_completion_sources.SCALE || oai_settings.chat_completion_source == chat_completion_sources.CLAUDE || oai_settings.chat_completion_source == chat_completion_sources.AI21) {
+        const noValidateSources = [chat_completion_sources.SCALE, chat_completion_sources.CLAUDE, chat_completion_sources.AI21, chat_completion_sources.PALM];
+        if (noValidateSources.includes(oai_settings.chat_completion_source)) {
             let status = 'Unable to verify key; press "Test Message" to validate.';
             setOnlineStatus(status);
             return resultCheckStatusOpen();
@@ -3047,7 +3152,7 @@ async function saveOpenAIPreset(name, settings, triggerUi = true) {
         use_alt_scale: settings.use_alt_scale,
     };
 
-    const savePresetSettings = await fetch(`/savepreset_openai?name=${name}`, {
+    const savePresetSettings = await fetch(`/api/presets/save-openai?name=${name}`, {
         method: 'POST',
         headers: getRequestHeaders(),
         body: JSON.stringify(presetBody),
@@ -3207,7 +3312,7 @@ async function onPresetImportFileChange(e) {
         }
     }
 
-    const savePresetSettings = await fetch(`/savepreset_openai?name=${name}`, {
+    const savePresetSettings = await fetch(`/api/presets/save-openai?name=${name}`, {
         method: 'POST',
         headers: getRequestHeaders(),
         body: importedFile,
@@ -3243,7 +3348,7 @@ async function onExportPresetClick() {
         return;
     }
 
-    const preset = deepClone(openai_settings[openai_setting_names[oai_settings.preset_settings_openai]]);
+    const preset = structuredClone(openai_settings[openai_setting_names[oai_settings.preset_settings_openai]]);
 
     delete preset.reverse_proxy;
     delete preset.proxy_password;
@@ -3319,14 +3424,16 @@ async function onDeletePresetClick() {
         $('#settings_perset_openai').trigger('change');
     }
 
-    const response = await fetch('/deletepreset_openai', {
+    const response = await fetch('/api/presets/delete-openai', {
         method: 'POST',
         headers: getRequestHeaders(),
         body: JSON.stringify({ name: nameToDelete }),
     });
 
     if (!response.ok) {
-        console.warn('Preset was not deleted from server');
+        toastr.warning('Preset was not deleted from server');
+    } else {
+        toastr.success('Preset deleted');
     }
 
     saveSettingsDebounced();
@@ -3535,6 +3642,17 @@ async function onModelChange() {
         $('#openai_max_context').val(oai_settings.openai_max_context).trigger('input');
     }
 
+    if (oai_settings.chat_completion_source == chat_completion_sources.PALM) {
+        if (oai_settings.max_context_unlocked) {
+            $('#openai_max_context').attr('max', unlocked_max);
+        } else {
+            $('#openai_max_context').attr('max', palm2_max);
+        }
+
+        oai_settings.openai_max_context = Math.min(Number($('#openai_max_context').attr('max')), oai_settings.openai_max_context);
+        $('#openai_max_context').val(oai_settings.openai_max_context).trigger('input');
+    }
+
     if (oai_settings.chat_completion_source == chat_completion_sources.OPENROUTER) {
         if (oai_settings.max_context_unlocked) {
             $('#openai_max_context').attr('max', unlocked_max);
@@ -3715,7 +3833,19 @@ async function onConnectButtonClick(e) {
             console.log("No cookie set for Scale");
             return;
         }
+    }
 
+    if (oai_settings.chat_completion_source == chat_completion_sources.PALM) {
+        const api_key_palm = String($('#api_key_palm').val()).trim();
+
+        if (api_key_palm.length) {
+            await writeSecret(SECRET_KEYS.PALM, api_key_palm);
+        }
+
+        if (!secret_state[SECRET_KEYS.PALM]) {
+            console.log('No secret key saved for PALM');
+            return;
+        }
     }
 
     if (oai_settings.chat_completion_source == chat_completion_sources.CLAUDE) {
@@ -3782,6 +3912,9 @@ function toggleChatCompletionForms() {
     }
     else if (oai_settings.chat_completion_source == chat_completion_sources.SCALE) {
         $('#model_scale_select').trigger('change');
+    }
+    else if (oai_settings.chat_completion_source == chat_completion_sources.PALM) {
+        $('#model_palm_select').trigger('change');
     }
     else if (oai_settings.chat_completion_source == chat_completion_sources.OPENROUTER) {
         $('#model_openrouter_select').trigger('change');
@@ -4085,6 +4218,7 @@ $(document).ready(async function () {
     $("#model_claude_select").on("change", onModelChange);
     $("#model_windowai_select").on("change", onModelChange);
     $("#model_scale_select").on("change", onModelChange);
+    $("#model_palm_select").on("change", onModelChange);
     $("#model_openrouter_select").on("change", onModelChange);
     $("#model_ai21_select").on("change", onModelChange);
     $("#settings_perset_openai").on("change", onSettingsPresetChange);

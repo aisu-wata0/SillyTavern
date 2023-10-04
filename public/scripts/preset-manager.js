@@ -24,7 +24,7 @@ import {
     textgenerationwebui_presets,
     textgenerationwebui_settings,
 } from "./textgen-settings.js";
-import { deepClone, download, parseJsonFile, waitUntilCondition } from "./utils.js";
+import { download, parseJsonFile, waitUntilCondition } from "./utils.js";
 
 const presetManagers = {};
 
@@ -133,7 +133,7 @@ class PresetManager {
     async savePreset(name, settings) {
         const preset = settings ?? this.getPresetSettings(name);
 
-        const res = await fetch(`/save_preset`, {
+        const res = await fetch(`/api/presets/save`, {
             method: "POST",
             headers: getRequestHeaders(),
             body: JSON.stringify({ preset, name, apiId: this.apiId })
@@ -236,11 +236,11 @@ class PresetManager {
                 case "textgenerationwebui":
                     return textgenerationwebui_settings;
                 case "context":
-                    const context_preset = deepClone(power_user.context);
+                    const context_preset = structuredClone(power_user.context);
                     context_preset['name'] = name || power_user.context.preset;
                     return context_preset;
                 case "instruct":
-                    const instruct_preset = deepClone(power_user.instruct);
+                    const instruct_preset = structuredClone(power_user.instruct);
                     instruct_preset['name'] = name || power_user.instruct.preset;
                     return instruct_preset;
                 default:
@@ -303,7 +303,7 @@ class PresetManager {
             $(this.select).trigger('change');
         }
 
-        const response = await fetch('/delete_preset', {
+        const response = await fetch('/api/presets/delete', {
             method: 'POST',
             headers: getRequestHeaders(),
             body: JSON.stringify({ name: nameToDelete, apiId: this.apiId }),
