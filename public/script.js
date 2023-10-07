@@ -20,6 +20,7 @@ import {
     isMancer,
     isAphrodite,
     textgen_types,
+    textgenerationwebui_banned_in_macros,
 } from "./scripts/textgen-settings.js";
 
 import {
@@ -595,6 +596,7 @@ function getCurrentChatId() {
 
 const talkativeness_default = 0.5;
 const depth_prompt_depth_default = 4;
+const per_page_default = 50;
 
 var is_advanced_char_open = false;
 
@@ -921,7 +923,7 @@ async function printCharacters(fullRefresh = false) {
     const storageKey = 'Characters_PerPage';
     $("#rm_print_characters_pagination").pagination({
         dataSource: getEntitiesList({ doFilter: true }),
-        pageSize: Number(localStorage.getItem(storageKey)) || 50,
+        pageSize: Number(localStorage.getItem(storageKey)) || per_page_default,
         sizeChangerOptions: [10, 25, 50, 100, 250, 500, 1000],
         pageRange: 1,
         pageNumber: saveCharactersPage || 1,
@@ -1757,7 +1759,35 @@ function substituteParams(content, _name1, _name2, _original, _group) {
     });
     content = randomReplace(content);
     content = diceRollReplace(content);
+    content = bannedWordsReplace(content);
     return content;
+}
+
+/**
+ * Replaces banned words in macros with an empty string.
+ * Adds them to textgenerationwebui ban list.
+ * @param {string} inText Text to replace banned words in
+ * @returns {string} Text without the "banned" macro
+ */
+function bannedWordsReplace(inText) {
+    if (!inText) {
+        return '';
+    }
+
+    const banPattern = /{{banned "(.*)"}}/gi;
+
+    if (main_api == 'textgenerationwebui') {
+        const bans = inText.matchAll(banPattern);
+        if (bans) {
+            for (const banCase of bans) {
+                console.log("Found banned words in macros: " + banCase[1]);
+                textgenerationwebui_banned_in_macros.push(banCase[1]);
+            }
+        }
+    }
+
+    inText = inText.replaceAll(banPattern, "");
+    return inText;
 }
 
 function getTimeSinceLastMessage() {
@@ -5464,7 +5494,7 @@ function select_rm_info(type, charId, previousCharId = null) {
             }
 
             try {
-                const perPage = Number(localStorage.getItem('Characters_PerPage'));
+                const perPage = Number(localStorage.getItem('Characters_PerPage')) || per_page_default;
                 const page = Math.floor(charIndex / perPage) + 1;
                 const selector = `#rm_print_characters_block [title^="${charId}"]`;
                 $('#rm_print_characters_pagination').pagination('go', page);
@@ -5499,7 +5529,7 @@ function select_rm_info(type, charId, previousCharId = null) {
                 return;
             }
 
-            const perPage = Number(localStorage.getItem('Characters_PerPage'));
+            const perPage = Number(localStorage.getItem('Characters_PerPage')) || per_page_default;
             const page = Math.floor(charIndex / perPage) + 1;
             $('#rm_print_characters_pagination').pagination('go', page);
             const selector = `#rm_print_characters_block [grid="${charId}"]`;
