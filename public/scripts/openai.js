@@ -1656,12 +1656,14 @@ function ARA_requestConfig() {
     const context_max_tokens = oai_settings.openai_max_context
     ARA_local.context_max_tokens = context_max_tokens
     return {
+        ...ARA_local.config,
         context_max_tokens,
     }
 }
 
 async function ARA_summary_req_update(summary_text, edit, mock, signal = null) {
-    console.log("Absolute RPG Adventure:", "ARA_summary_req_update() ARA_summary()=", ARA_summary_request())
+    const summary_request = ARA_summary_request()
+    console.log("Absolute RPG Adventure:", "ARA_summary_req_update() ARA_summary()=", summary_request)
     let data = null;
     try {
         // Send back the summary
@@ -1669,18 +1671,15 @@ async function ARA_summary_req_update(summary_text, edit, mock, signal = null) {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                ...ARA_summary_request(),
+                ...summary_request,
                 summary_text,
                 summary_edit: edit,
                 summary_mock: mock,
                 summaryTriesLeft: ARA_local.summaryTriesLeft,
-                config: {
-                    ...ARA_requestConfig(),
-                },
                 ARA: {
                     ...ARA,
-                    chat_id: ARA_summary_request().chat_id,
-                    config: ARA_local.config,
+                    config: ARA_requestConfig(),
+                    chat_id: summary_request.chat_id,
                 },
             }),
             signal,
@@ -1735,13 +1734,10 @@ async function ARA_prompt(generate_data, chat_id, signal) {
     }
     const body = {
         generate_data,
-        config: {
-            ...ARA_requestConfig(),
-        },
         ARA: {
             ...ARA,
+            config: ARA_requestConfig(),
             chat_id,
-            config: ARA_local.config,
         },
     }
     const post = {
@@ -1850,13 +1846,10 @@ async function ARA_getResult(lastReply, chat_id, generate_data_prev, signal = nu
     const body = {
         lastReply,
         generate_data_prev,
-        config: {
-            ...ARA_requestConfig(),
-        },
         ARA: {
             ...ARA,
+            config: ARA_requestConfig(),
             chat_id,
-            config: ARA_local.config,
         },
     }
     const post = {
