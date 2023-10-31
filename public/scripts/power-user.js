@@ -41,10 +41,14 @@ export {
     fixMarkdown,
     power_user,
     send_on_enter_options,
+    getContextSettings,
 };
 
-export const MAX_CONTEXT_DEFAULT = 4096;
+export const MAX_CONTEXT_DEFAULT = 8192;
 const MAX_CONTEXT_UNLOCKED = 65536;
+const unlockedMaxContextStep = 256;
+const maxContextMin = 512;
+const maxContextStep = 64;
 
 const defaultStoryString = "{{#if system}}{{system}}\n{{/if}}{{#if description}}{{description}}\n{{/if}}{{#if personality}}{{char}}'s personality: {{personality}}\n{{/if}}{{#if scenario}}Scenario: {{scenario}}\n{{/if}}{{#if persona}}{{persona}}\n{{/if}}";
 const defaultExampleSeparator = '***';
@@ -131,7 +135,6 @@ let power_user = {
 
     custom_css: '',
 
-
     waifuMode: false,
     movingUI: false,
     movingUIState: {},
@@ -139,7 +142,7 @@ let power_user = {
     noShadows: false,
     theme: 'Default (Dark) 1.7.1',
 
-
+    gestures: true,
     auto_swipe: false,
     auto_swipe_minimum_length: 0,
     auto_swipe_blacklist: [],
@@ -169,7 +172,9 @@ let power_user = {
     continue_on_send: false,
     trim_spaces: true,
     relaxed_api_urls: false,
+    world_import_dialog: true,
     disable_group_trimming: false,
+    single_line: false,
 
     default_instruct: '',
     instruct: {
@@ -251,6 +256,19 @@ const storage_keys = {
     message_token_count_enabled: 'MessageTokenCountEnabled',
     expand_message_actions: 'ExpandMessageActions',
 };
+
+const contextControls = [
+    // Power user context scoped settings
+    { id: "context_story_string", property: "story_string", isCheckbox: false, isGlobalSetting: false },
+    { id: "context_example_separator", property: "example_separator", isCheckbox: false, isGlobalSetting: false },
+    { id: "context_chat_start", property: "chat_start", isCheckbox: false, isGlobalSetting: false },
+
+    // Existing power user settings
+    { id: "always-force-name2-checkbox", property: "always_force_name2", isCheckbox: true, isGlobalSetting: true, defaultValue: true },
+    { id: "trim_sentences_checkbox", property: "trim_sentences", isCheckbox: true, isGlobalSetting: true, defaultValue: false },
+    { id: "include_newline_checkbox", property: "include_newline", isCheckbox: true, isGlobalSetting: true, defaultValue: false },
+    { id: "single_line", property: "single_line", isCheckbox: true, isGlobalSetting: true, defaultValue: false },
+];
 
 let browser_has_focus = true;
 const debug_functions = [];
@@ -402,6 +420,7 @@ function switchMessageActions() {
     power_user.expand_message_actions = value === null ? false : value == "true";
     $("body").toggleClass("expandMessageActions", power_user.expand_message_actions);
     $("#expandMessageActions").prop("checked", power_user.expand_message_actions);
+    $('.extraMesButtons, .extraMesButtonsHint').removeAttr('style');
 }
 
 function switchUiMode() {
@@ -539,7 +558,7 @@ function applyChatWidth(type) {
         })
     }
 
-    $('#chat_width_slider_counter').text(power_user.chat_width);
+    $('#chat_width_slider_counter').val(power_user.chat_width);
 }
 
 async function applyThemeColor(type) {
@@ -600,7 +619,7 @@ async function applyCustomCSS() {
 async function applyBlurStrength() {
     power_user.blur_strength = Number(localStorage.getItem(storage_keys.blur_strength) ?? 1);
     document.documentElement.style.setProperty('--blurStrength', power_user.blur_strength);
-    $("#blur_strength_counter").text(power_user.blur_strength);
+    $("#blur_strength_counter").val(power_user.blur_strength);
     $("#blur_strength").val(power_user.blur_strength);
 
 
@@ -609,7 +628,7 @@ async function applyBlurStrength() {
 async function applyShadowWidth() {
     power_user.shadow_width = Number(localStorage.getItem(storage_keys.shadow_width) ?? 2);
     document.documentElement.style.setProperty('--shadowWidth', power_user.shadow_width);
-    $("#shadow_width_counter").text(power_user.shadow_width);
+    $("#shadow_width_counter").val(power_user.shadow_width);
     $("#shadow_width").val(power_user.shadow_width);
 
 }
@@ -627,7 +646,7 @@ async function applyFontScale(type) {
         })
     }
 
-    $("#font_scale_counter").text(power_user.font_scale);
+    $("#font_scale_counter").val(power_user.font_scale);
     $("#font_scale").val(power_user.font_scale);
 }
 
@@ -839,6 +858,18 @@ switchMesIDDisplay();
 switchTokenCount();
 switchMessageActions();
 
+function getExampleMessagesBehavior() {
+    if (power_user.strip_examples) {
+        return 'strip';
+    }
+
+    if (power_user.pin_examples) {
+        return 'keep';
+    }
+
+    return 'normal';
+}
+
 function loadPowerUserSettings(settings, data) {
     // Load from settings.json
     if (settings.power_user !== undefined) {
@@ -867,7 +898,6 @@ function loadPowerUserSettings(settings, data) {
     const timestamps = localStorage.getItem(storage_keys.timestamps_enabled);
     const mesIDDisplay = localStorage.getItem(storage_keys.mesIDDisplay_enabled);
     const expandMessageActions = localStorage.getItem(storage_keys.expand_message_actions);
-    console.log(expandMessageActions)
     power_user.fast_ui_mode = fastUi === null ? true : fastUi == "true";
     power_user.movingUI = movingUI === null ? false : movingUI == "true";
     power_user.noShadows = noShadows === null ? false : noShadows == "true";
@@ -876,7 +906,6 @@ function loadPowerUserSettings(settings, data) {
     power_user.timestamps_enabled = timestamps === null ? true : timestamps == "true";
     power_user.mesIDDisplay_enabled = mesIDDisplay === null ? true : mesIDDisplay == "true";
     power_user.expand_message_actions = expandMessageActions === null ? true : expandMessageActions == "true";
-    console.log(power_user.expand_message_actions)
     power_user.avatar_style = Number(localStorage.getItem(storage_keys.avatar_style) ?? avatar_styles.ROUND);
     //power_user.chat_display = Number(localStorage.getItem(storage_keys.chat_display) ?? chat_styles.DEFAULT);
     power_user.chat_width = Number(localStorage.getItem(storage_keys.chat_width) ?? 50);
@@ -899,11 +928,14 @@ function loadPowerUserSettings(settings, data) {
         power_user.tokenizer = tokenizers.GPT2;
     }
 
+    $('#single_line').prop("checked", power_user.single_line);
     $('#relaxed_api_urls').prop("checked", power_user.relaxed_api_urls);
+    $('#world_import_dialog').prop("checked", power_user.world_import_dialog);
     $('#trim_spaces').prop("checked", power_user.trim_spaces);
     $('#continue_on_send').prop("checked", power_user.continue_on_send);
     $('#quick_continue').prop("checked", power_user.quick_continue);
     $('#mes_continue').css('display', power_user.quick_continue ? '' : 'none');
+    $('#gestures-checkbox').prop("checked", power_user.gestures);
     $('#auto_swipe').prop("checked", power_user.auto_swipe);
     $('#auto_swipe_minimum_length').val(power_user.auto_swipe_minimum_length);
     $('#auto_swipe_blacklist').val(power_user.auto_swipe_blacklist.join(", "));
@@ -913,6 +945,8 @@ function loadPowerUserSettings(settings, data) {
     $('#fuzzy_search_checkbox').prop("checked", power_user.fuzzy_search);
     $('#persona_show_notifications').prop("checked", power_user.persona_show_notifications);
     $('#encode_tags').prop("checked", power_user.encode_tags);
+    $('#example_messages_behavior').val(getExampleMessagesBehavior());
+    $(`#example_messages_behavior option[value="${getExampleMessagesBehavior()}"]`).prop("selected", true);
 
     $("#console_log_prompts").prop("checked", power_user.console_log_prompts);
     $('#auto_fix_generated_markdown').prop("checked", power_user.auto_fix_generated_markdown);
@@ -923,8 +957,6 @@ function loadPowerUserSettings(settings, data) {
     $("#confirm_message_delete").prop("checked", power_user.confirm_message_delete !== undefined ? !!power_user.confirm_message_delete : true);
     $("#spoiler_free_mode").prop("checked", power_user.spoiler_free_mode);
     $("#collapse-newlines-checkbox").prop("checked", power_user.collapse_newlines);
-    $("#pin-examples-checkbox").prop("checked", power_user.pin_examples);
-    $("#remove-examples-checkbox").prop("checked", power_user.strip_examples);
     $("#always-force-name2-checkbox").prop("checked", power_user.always_force_name2);
     $("#trim_sentences_checkbox").prop("checked", power_user.trim_sentences);
     $("#include_newline_checkbox").prop("checked", power_user.include_newline);
@@ -961,13 +993,13 @@ function loadPowerUserSettings(settings, data) {
     $("#token_padding").val(power_user.token_padding);
 
     $("#font_scale").val(power_user.font_scale);
-    $("#font_scale_counter").text(power_user.font_scale);
+    $("#font_scale_counter").val(power_user.font_scale);
 
     $("#blur_strength").val(power_user.blur_strength);
-    $("#blur_strength_counter").text(power_user.blur_strength);
+    $("#blur_strength_counter").val(power_user.blur_strength);
 
     $("#shadow_width").val(power_user.shadow_width);
-    $("#shadow_width_counter").text(power_user.shadow_width);
+    $("#shadow_width_counter").val(power_user.shadow_width);
 
     $("#main-text-color-picker").attr('color', power_user.main_text_color);
     $("#italics-color-picker").attr('color', power_user.italics_text_color);
@@ -1064,9 +1096,16 @@ function loadMaxContextUnlocked() {
 function switchMaxContextSize() {
     const elements = [$('#max_context'), $('#rep_pen_range'), $('#rep_pen_range_textgenerationwebui')];
     const maxValue = power_user.max_context_unlocked ? MAX_CONTEXT_UNLOCKED : MAX_CONTEXT_DEFAULT;
+    const minValue = power_user.max_context_unlocked ? maxContextMin : maxContextMin;
+    const steps = power_user.max_context_unlocked ? unlockedMaxContextStep : maxContextStep;
 
     for (const element of elements) {
         element.attr('max', maxValue);
+        element.attr('step', steps);
+
+        if (element.attr('id') == 'max_context') {
+            element.attr('min', minValue);
+        }
         const value = Number(element.val());
 
         if (value >= maxValue) {
@@ -1075,15 +1114,33 @@ function switchMaxContextSize() {
     }
 }
 
-function loadContextSettings() {
-    const controls = [
-        { id: "context_story_string", property: "story_string", isCheckbox: false },
-        { id: "context_example_separator", property: "example_separator", isCheckbox: false },
-        { id: "context_chat_start", property: "chat_start", isCheckbox: false },
-    ];
+// Fetch a compiled object of all preset settings
+function getContextSettings() {
+    let compiledSettings = {};
 
-    controls.forEach(control => {
+    contextControls.forEach((control) => {
+        let value = control.isGlobalSetting ? power_user[control.property] : power_user.context[control.property];
+
+        // Force to a boolean if the setting is a checkbox
+        if (control.isCheckbox) {
+            value = !!value;
+        }
+
+        compiledSettings[control.property] = value;
+    });
+
+    return compiledSettings;
+}
+
+// TODO: Maybe add a refresh button to reset settings to preset
+// TODO: Add "global state" if a preset doesn't set the power_user checkboxes
+function loadContextSettings() {
+    contextControls.forEach(control => {
         const $element = $(`#${control.id}`);
+
+        if (control.isGlobalSetting) {
+            return;
+        }
 
         if (control.isCheckbox) {
             $element.prop('checked', power_user.context[control.property]);
@@ -1091,8 +1148,16 @@ function loadContextSettings() {
             $element.val(power_user.context[control.property]);
         }
 
+        // If the setting already exists, no need to duplicate it
+        // TODO: Maybe check the power_user object for the setting instead of a flag?
         $element.on('input', function () {
-            power_user.context[control.property] = control.isCheckbox ? !!$(this).prop('checked') : $(this).val();
+            const value = control.isCheckbox ? !!$(this).prop('checked') : $(this).val();
+            if (control.isGlobalSetting) {
+                power_user[control.property] = value;
+            } else {
+                power_user.context[control.property] = value;
+            }
+
             saveSettingsDebounced();
             if (!control.isCheckbox) {
                 resetScrollHeight($element);
@@ -1118,15 +1183,26 @@ function loadContextSettings() {
         }
 
         power_user.context.preset = name;
-        controls.forEach(control => {
-            if (preset[control.property] !== undefined) {
-                power_user.context[control.property] = preset[control.property];
+        contextControls.forEach(control => {
+            const presetValue = preset[control.property] ?? control.defaultValue;
+
+            if (presetValue !== undefined) {
+                if (control.isGlobalSetting) {
+                    power_user[control.property] = presetValue;
+                } else {
+                    power_user.context[control.property] = presetValue;
+                }
+
                 const $element = $(`#${control.id}`);
 
                 if (control.isCheckbox) {
-                    $element.prop('checked', power_user.context[control.property]).trigger('input');
+                    $element
+                        .prop('checked', control.isGlobalSetting ? power_user[control.property] : power_user.context[control.property])
+                        .trigger('input');
                 } else {
-                    $element.val(power_user.context[control.property]).trigger('input');
+                    $element
+                        .val(control.isGlobalSetting ? power_user[control.property] : power_user.context[control.property])
+                        .trigger('input');
                 }
             }
         });
@@ -1169,7 +1245,7 @@ function highlightDefaultContext() {
 export function fuzzySearchCharacters(searchValue) {
     const fuse = new Fuse(characters, {
         keys: [
-            { name: 'data.name', weight: 5 },
+            { name: 'data.name', weight: 8 },
             { name: 'data.description', weight: 3 },
             { name: 'data.mes_example', weight: 3 },
             { name: 'data.scenario', weight: 2 },
@@ -1247,7 +1323,7 @@ export function renderStoryString(params) {
         output = output.trimStart();
 
         // add a newline to the end of the story string if it doesn't have one
-        if (!output.endsWith('\n')) {
+        if (output.length > 0 && !output.endsWith('\n')) {
             output += '\n';
         }
 
@@ -1417,12 +1493,15 @@ async function resetMovablePanels(type) {
         'WorldInfo',
         'floatingPrompt',
         'expression-holder',
-        'groupMemberListPopout'
+        'groupMemberListPopout',
+        'summaryExtensionPopout',
+        'gallery'
     ];
 
     const panelStyles = ['top', 'left', 'right', 'bottom', 'height', 'width', 'margin',];
 
     panelIds.forEach((id) => {
+        console.log(id)
         const panel = document.getElementById(id);
 
         if (panel) {
@@ -1851,28 +1930,6 @@ $(document).ready(() => {
         saveSettingsDebounced();
     });
 
-    $("#pin-examples-checkbox").change(function () {
-        if ($(this).prop("checked")) {
-            $("#remove-examples-checkbox").prop("checked", false).prop("disabled", true);
-            power_user.strip_examples = false;
-        } else {
-            $("#remove-examples-checkbox").prop("disabled", false);
-        }
-        power_user.pin_examples = !!$(this).prop("checked");
-        saveSettingsDebounced();
-    });
-
-    $("#remove-examples-checkbox").change(function () {
-        if ($(this).prop("checked")) {
-            $("#pin-examples-checkbox").prop("checked", false).prop("disabled", true);
-            power_user.pin_examples = false;
-        } else {
-            $("#pin-examples-checkbox").prop("disabled", false);
-        }
-        power_user.strip_examples = !!$(this).prop("checked");
-        saveSettingsDebounced();
-    });
-
     // include newline is the child of trim sentences
     // if include newline is checked, trim sentences must be checked
     // if trim sentences is unchecked, include newline must be unchecked
@@ -1891,6 +1948,12 @@ $(document).ready(() => {
             $("#trim_sentences_checkbox").prop("checked", true);
             power_user.trim_sentences = true;
         }
+        saveSettingsDebounced();
+    });
+
+    $('#single_line').on("input", function () {
+        const value = !!$(this).prop('checked');
+        power_user.single_line = value;
         saveSettingsDebounced();
     });
 
@@ -1928,6 +1991,31 @@ $(document).ready(() => {
 
     $("#auto_continue_target_length").on('input', function () {
         power_user.auto_continue.target_length = Number($(this).val());
+        saveSettingsDebounced();
+    });
+
+    $('#example_messages_behavior').on('change', function () {
+        const selectedOption = String($(this).find(':selected').val());
+        console.log('Setting example messages behavior to', selectedOption);
+
+        switch (selectedOption) {
+            case 'normal':
+                power_user.pin_examples = false;
+                power_user.strip_examples = false;
+                break;
+            case 'keep':
+                power_user.pin_examples = true;
+                power_user.strip_examples = false;
+                break;
+            case 'strip':
+                power_user.pin_examples = false;
+                power_user.strip_examples = true;
+                break;
+        }
+
+        console.debug('power_user.pin_examples', power_user.pin_examples);
+        console.debug('power_user.strip_examples', power_user.strip_examples);
+
         saveSettingsDebounced();
     });
 
@@ -1994,7 +2082,7 @@ $(document).ready(() => {
 
     $(`input[name="font_scale"]`).on('input', async function (e) {
         power_user.font_scale = Number(e.target.value);
-        $("#font_scale_counter").text(power_user.font_scale);
+        $("#font_scale_counter").val(power_user.font_scale);
         localStorage.setItem(storage_keys.font_scale, power_user.font_scale);
         await applyFontScale();
         saveSettingsDebounced();
@@ -2002,7 +2090,7 @@ $(document).ready(() => {
 
     $(`input[name="blur_strength"]`).on('input', async function (e) {
         power_user.blur_strength = Number(e.target.value);
-        $("#blur_strength_counter").text(power_user.blur_strength);
+        $("#blur_strength_counter").val(power_user.blur_strength);
         localStorage.setItem(storage_keys.blur_strength, power_user.blur_strength);
         await applyBlurStrength();
         saveSettingsDebounced();
@@ -2010,7 +2098,7 @@ $(document).ready(() => {
 
     $(`input[name="shadow_width"]`).on('input', async function (e) {
         power_user.shadow_width = Number(e.target.value);
-        $("#shadow_width_counter").text(power_user.shadow_width);
+        $("#shadow_width_counter").val(power_user.shadow_width);
         localStorage.setItem(storage_keys.shadow_width, power_user.shadow_width);
         await applyShadowWidth();
         saveSettingsDebounced();
@@ -2045,7 +2133,6 @@ $(document).ready(() => {
         applyThemeColor('chatTint');
         saveSettingsDebounced();
     });
-
 
     $("#user-mes-blur-tint-color-picker").on('change', (evt) => {
         power_user.user_mes_blur_tint_color = evt.detail.rgba;
@@ -2084,7 +2171,6 @@ $(document).ready(() => {
         power_user.movingUIPreset = movingUIPresetSelected;
         applyMovingUIPreset(movingUIPresetSelected);
         saveSettingsDebounced();
-
     });
 
     $("#ui-preset-save-button").on('click', saveTheme);
@@ -2121,6 +2207,11 @@ $(document).ready(() => {
         power_user.sort_order = $(this).find(":selected").data('order');
         power_user.sort_rule = $(this).find(":selected").data('rule');
         printCharacters();
+        saveSettingsDebounced();
+    });
+
+    $('#gestures-checkbox').on('change', function () {
+        power_user.gestures = !!$('#gestures-checkbox').prop('checked');
         saveSettingsDebounced();
     });
 
@@ -2318,6 +2409,12 @@ $(document).ready(() => {
         saveSettingsDebounced();
     });
 
+    $("#world_import_dialog").on("input", function () {
+        const value = !!$(this).prop('checked');
+        power_user.world_import_dialog = value;
+        saveSettingsDebounced();
+    });
+
     $('#spoiler_free_mode').on('input', function () {
         power_user.spoiler_free_mode = !!$(this).prop('checked');
         switchSpoilerMode();
@@ -2390,11 +2487,11 @@ $(document).ready(() => {
         browser_has_focus = false;
     });
 
-    registerSlashCommand('vn', toggleWaifu, [], ' – swaps Visual Novel Mode On/Off', false, true);
-    registerSlashCommand('newchat', doNewChat, ['newchat'], ' – start a new chat with current character', true, true);
-    registerSlashCommand('random', doRandomChat, ['random'], ' – start a new chat with a random character', true, true);
+    registerSlashCommand('vn', toggleWaifu, [], '– swaps Visual Novel Mode On/Off', false, true);
+    registerSlashCommand('newchat', doNewChat, [], '– start a new chat with current character', true, true);
+    registerSlashCommand('random', doRandomChat, [], '– start a new chat with a random character', true, true);
     registerSlashCommand('delmode', doDelMode, ['del'], '<span class="monospace">(optional number)</span> – enter message deletion mode, and auto-deletes N messages if numeric argument is provided', true, true);
-    registerSlashCommand('cut', doMesCut, [], ' <span class="monospace">(requred number)</span> – cuts the specified message from the chat', true, true);
-    registerSlashCommand('resetpanels', doResetPanels, ['resetui'], ' – resets UI panels to original state.', true, true);
-    registerSlashCommand('bgcol', setAvgBG, [], ' – WIP test of auto-bg avg coloring', true, true);
+    registerSlashCommand('cut', doMesCut, [], '<span class="monospace">(number)</span> – cuts the specified message from the chat', true, true);
+    registerSlashCommand('resetpanels', doResetPanels, ['resetui'], '– resets UI panels to original state.', true, true);
+    registerSlashCommand('bgcol', setAvgBG, [], '– WIP test of auto-bg avg coloring', true, true);
 });
