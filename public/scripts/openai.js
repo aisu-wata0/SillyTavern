@@ -2118,6 +2118,52 @@ async function sendAltScaleRequest(openai_msgs_tosend, logit_bias, signal) {
     return data.output;
 }
 
+
+/** get unfinished section formatting */
+const findUnfinishedPairs = (text, startPattern = /<!--/g, endPattern = /-->/g) => {
+    const startMatches = [];
+    const endMatches = [];
+
+    // Find all occurrences of <!-- and -->, and store their positions
+    let match;
+    while ((match = startPattern.exec(text)) !== null) {
+        startMatches.push(match.index);
+    }
+
+    while ((match = endPattern.exec(text)) !== null) {
+        endMatches.push(match.index);
+    }
+
+    // Pair start and end matches to detect invalid cases
+    let unmatchedStartIdxs = [];
+    let unmatchedEndIdxs = [];
+    while (startMatches.length > 0) {
+        const startIndex = startMatches.shift();
+
+        if (endMatches.length === 0) {
+            ;
+            unmatchedStartIdxs.push(startIndex)
+            continue;
+        }
+
+        const endIndex = endMatches.shift();
+
+        if (endIndex < startIndex) {
+            unmatchedEndIdxs.push(endIndex)
+            // reinsert startIndex at the start of startMatches so that it can (possibly) match with the next endIndex
+            unmatchedStartIdxs.unshift(startIndex)
+            continue;
+        }
+    }
+
+    // Check for any unmatched -->
+    while (endMatches.length > 0) {
+        const endIndex = endMatches.shift();
+        unmatchedEndIdxs.push(endIndex)
+    }
+    return [unmatchedStartIdxs, unmatchedEndIdxs]
+}
+
 async function sendOpenAIRequest(type, openai_msgs_tosend, signal, chat_id) {
     // Provide default abort signal
     if (!signal) {
@@ -2296,7 +2342,11 @@ async function sendOpenAIRequest(type, openai_msgs_tosend, signal, chat_id) {
                     let data = JSON.parse(event.substring(6));
                     // the first and last messages are undefined, protect against that
                     getMessage = getStreamingReply(getMessage, data);
-                    yield getMessage;
+
+                    const unfinishedPairs = findUnfinishedPairs(getMessage)
+                    if (done || unfinishedPairs[0].length == 0) {
+                        yield getMessage;
+                    }
                 }
 
                 if (done) {
