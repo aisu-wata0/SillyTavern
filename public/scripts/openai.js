@@ -2119,7 +2119,7 @@ async function sendAltScaleRequest(openai_msgs_tosend, logit_bias, signal) {
 }
 
 
-/** get unfinished section formatting */
+/** Get unfinished section formatting. Doesn't handle nesting! */
 const findUnfinishedPairs = (text, startPattern = /<!--/g, endPattern = /-->/g) => {
     const startMatches = [];
     const endMatches = [];
@@ -2344,8 +2344,12 @@ async function sendOpenAIRequest(type, openai_msgs_tosend, signal, chat_id) {
                     getMessage = getStreamingReply(getMessage, data);
 
                     const unfinishedPairs = findUnfinishedPairs(getMessage)
+                    
                     if (done || unfinishedPairs[0].length == 0) {
                         yield getMessage;
+                    } else {
+                        const lastUnfinishedStartIdx = unfinishedPairs[0][unfinishedPairs[0].length - 1]
+                        yield getMessage.slice(0, lastUnfinishedStartIdx) + ".".repeat(1 + (getMessage.length - lastUnfinishedStartIdx) / 40);
                     }
                 }
 
