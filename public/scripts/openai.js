@@ -2118,37 +2118,62 @@ async function sendAltScaleRequest(openai_msgs_tosend, logit_bias, signal) {
     return data.output;
 }
 
+const haveSameCaptureGroupMatch = (match1, match2) => {
+    if (match1.length !== match2.length) {
+        console.error("Matches from regex on `haveSameCaptureGroupMatch` have different number of capturing groups")
+        return false; // Ensure both match objects have the same number of capturing groups
+    }
 
-/** Get unfinished section formatting. Doesn't handle nesting! */
-const findUnfinishedPairs = (text, startPattern = /<!--/g, endPattern = /-->/g) => {
+    for (let i = 1; i < match1.length; i++) {
+        if ((match1[i] !== undefined && match2[i] === undefined) || (match1[i] === undefined && match2[i] !== undefined)) {
+            return false; // One match has a capture group match while the other doesn't
+        }
+
+        if (match1[i] !== undefined && match2[i] !== undefined) {
+            return i;
+        }
+    }
+
+    return false;
+};
+
+/** Get unfinished section formatting. Doesn't handle nesting!
+ * Default arguments handle HTML comments and single-line md invisible text like this: [](#'invisible text')
+ */
+const findUnfinishedPairs = (text, startPattern = /(<!--)|(\]\(#\')/g, endPattern = /(-->)|(\'\))/g) => {
     const startMatches = [];
     const endMatches = [];
 
     // Find all occurrences of <!-- and -->, and store their positions
     let match;
     while ((match = startPattern.exec(text)) !== null) {
-        startMatches.push(match.index);
+        startMatches.push(match);
     }
 
     while ((match = endPattern.exec(text)) !== null) {
-        endMatches.push(match.index);
+        endMatches.push(match);
     }
 
     // Pair start and end matches to detect invalid cases
     let unmatchedStartIdxs = [];
     let unmatchedEndIdxs = [];
     while (startMatches.length > 0) {
-        const startIndex = startMatches.shift();
+        const start = startMatches.shift();
+        const startIndex = start.index;
 
         if (endMatches.length === 0) {
-            ;
             unmatchedStartIdxs.push(startIndex)
             continue;
         }
 
-        const endIndex = endMatches.shift();
+        const end = endMatches.shift();
+        const endIndex = end.index;
 
-        if (endIndex < startIndex) {
+        const sameGroup = haveSameCaptureGroupMatch(start, end);
+        if (endIndex < startIndex || !sameGroup) {
+            if (!sameGroup) {
+                console.warn("Text on `findUnfinishedPairs` have possibly nested or weird formatting, check regexes too")
+            }
             unmatchedEndIdxs.push(endIndex)
             // reinsert startIndex at the start of startMatches so that it can (possibly) match with the next endIndex
             unmatchedStartIdxs.unshift(startIndex)
@@ -2158,7 +2183,8 @@ const findUnfinishedPairs = (text, startPattern = /<!--/g, endPattern = /-->/g) 
 
     // Check for any unmatched -->
     while (endMatches.length > 0) {
-        const endIndex = endMatches.shift();
+        const end = endMatches.shift();
+        const endIndex = end.index;
         unmatchedEndIdxs.push(endIndex)
     }
     return [unmatchedStartIdxs, unmatchedEndIdxs]
@@ -2343,9 +2369,12 @@ async function sendOpenAIRequest(type, openai_msgs_tosend, signal, chat_id) {
                     // the first and last messages are undefined, protect against that
                     getMessage = getStreamingReply(getMessage, data);
 
+                    if (done) {
+                        yield getMessage;
+                    }
                     const unfinishedPairs = findUnfinishedPairs(getMessage)
                     
-                    if (done || unfinishedPairs[0].length == 0) {
+                    if (unfinishedPairs[0].length == 0) {
                         yield getMessage;
                     } else {
                         const lastUnfinishedStartIdx = unfinishedPairs[0][unfinishedPairs[0].length - 1]
