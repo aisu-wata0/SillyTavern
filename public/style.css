@@ -1086,6 +1086,7 @@ input[type="file"] {
 #rm_button_characters,
 #rm_button_panel_pin_div,
 #lm_button_panel_pin_div,
+#ARA_button_panel_pin_div,
 #WI_button_panel_pin_div {
     font-size: 24px;
     display: inline;
@@ -1093,6 +1094,7 @@ input[type="file"] {
 
 #rm_button_panel_pin_div,
 #lm_button_panel_pin_div,
+#ARA_button_panel_pin_div,
 #WI_button_panel_pin_div {
     opacity: 0.5;
     transition: 0.3s;
@@ -1100,46 +1102,55 @@ input[type="file"] {
 
 #rm_button_panel_pin_div:hover,
 #lm_button_panel_pin_div:hover,
+#ARA_button_panel_pin_div:hover,
 #WI_button_panel_pin_div:hover {
     opacity: 1;
 }
 
-#lm_button_panel_pin_div {
+#lm_button_panel_pin_div,
+#ARA_button_panel_pin_div
+{
     text-align: start;
 }
 
 #rm_button_panel_pin,
 #lm_button_panel_pin,
+#ARA_button_panel_pin,
 #WI_panel_pin {
     display: none;
 }
 
 #rm_button_panel_pin:checked+label,
 #lm_button_panel_pin:checked+label,
+#ARA_button_panel_pin:checked+label,
 #WI_panel_pin:checked+label {
     display: inline;
 }
 
 #rm_button_panel_pin:checked+label .checked,
 #lm_button_panel_pin:checked+label .checked,
+#ARA_button_panel_pin:checked+label .checked,
 #WI_panel_pin:checked+label .checked {
     display: inline;
 }
 
 #rm_button_panel_pin:checked+label .unchecked,
 #lm_button_panel_pin:checked+label .unchecked,
+#ARA_button_panel_pin:checked+label .unchecked,
 #WI_panel_pin:checked+label .unchecked {
     display: none;
 }
 
 #rm_button_panel_pin:not(:checked)+label .checked,
 #lm_button_panel_pin:not(:checked)+label .checked,
+#ARA_button_panel_pin:not(:checked)+label .checked,
 #WI_panel_pin:not(:checked)+label .checked {
     display: none;
 }
 
 #rm_button_panel_pin:not(:checked)+label .unchecked,
 #lm_button_panel_pin:not(:checked)+label .unchecked,
+#ARA_button_panel_pin:not(:checked)+label .unchecked,
 #WI_panel_pin:not(:checked)+label .unchecked {
     display: inline;
 }

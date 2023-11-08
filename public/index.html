@@ -1745,15 +1745,15 @@
 
         <div id="ara-show-button" class="drawer">
             <div class="drawer-toggle drawer-header">
-                <div id="AraDrawerIcon" class="drawer-icon fa-solid  fa-address-card  closedIcon" title="ARA Sheet"></div>
+                <div id="AraDrawerIcon" class="drawer-icon fa-solid fa-gamepad closedIcon" title="ARPG Status Sheet & Summary & Config"></div>
             </div>
 
-            <div id="ara-panel" class="drawer-content fillLeft closedDrawer">
+            <nav id="ara-panel" class="drawer-content fillLeft closedDrawer">
                 <div id="ara-panelheader" class="fa-solid fa-grip drag-grabber"></div>
                 <div id="ARA_button_panel_pin_div" title="Locked = ARA panel will stay open">
                     <input type="checkbox" id="ARA_button_panel_pin">
                     <label for="ARA_button_panel_pin">
-                        <i class="unchecked fa-solid fa-lock-open " style="display: none;"></i>
+                        <i class="unchecked fa-solid fa-unlock "></i>
                         <i class="checked fa-solid fa-lock "></i>
                     </label>
                 </div>
@@ -1817,13 +1817,13 @@
                             <span id="ARA_button_summary_regenerate_text">Regenerate summary</span>
                         </div>
 
-                        <textarea id="ARA-summary_text"></textarea>
+                        <textarea id="ARA-summary_text" style="height: 6em;"></textarea>
 
                         <div style="display: flex;" title="Preemptive summary means you generate one summary ahead, so the second to last summary is the one used in swipes, so don't forget to edit that one.">
                             <i id="ARA_summary_send" class="fa-solid fa-feather-pointed" title="Send summary" style="display: flex;"></i>
                             <i title="Waiting" class="fa-solid fa-hourglass-half" id="ARA_summary_waiting" style="display: none;"></i>
                             &nbsp;
-                            Set summary&nbsp;<small> (used on next swipe and way later, careful with preemptive, hover mouse)  (resizable)</small>
+                            Set summary&nbsp;<small>(resizable) (used on next swipe and way later, careful with preemptive, hover mouse)  </small>
                         </div>
                     </div>
                 </div>
@@ -1837,7 +1837,7 @@
                         </div>
                     </div>
                 </div>
-            </div>
+            </nav>
         </div>
 
 

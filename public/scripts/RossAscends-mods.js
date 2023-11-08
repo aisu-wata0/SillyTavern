@@ -459,6 +459,12 @@ function OpenNavPanels() {
             console.debug("RA -- clicking WI to open");
             $("#WIDrawerIcon").click();
         }
+
+        //auto-open ARA if locked and previously open
+        if (LoadLocalBool("ARALockOn") == true && LoadLocalBool("ARANavOpened") == true) {
+            console.debug("RA -- clicking ARA nav to open");
+            $("#AraDrawerIcon").click();
+        }
     }
 }
 
@@ -806,18 +812,18 @@ export function initRossMods() {
         let ARAPin_icon0 = $(ARAPin).siblings("label")[0].children[0];
         let ARAPin_icon1 = $(ARAPin).siblings("label")[0].children[1];
         if ($(ARAPin).prop("checked") == true) {
-            console.log('adding pin class to Left nav');
+            console.debug('adding pin class to Left nav');
             $(ARAPanel).addClass('pinnedOpen');
 
             $(ARAPin_icon0).css('display', 'none')
             $(ARAPin_icon1).css('display', 'inline')
         } else {
-            console.log('removing pin class from Left nav');
+            console.debug('removing pin class from Left nav');
             $(ARAPanel).removeClass('pinnedOpen');
 
             if ($(ARAPanel).hasClass('openDrawer') && $('.openDrawer').length > 1) {
                 $(ARAPanel).slideToggle(200, "swing");
-                $(ARADrawerIcon).toggleClass('openIcon closedIcon');
+                // $(AraDrawerIcon).toggleClass('openIcon closedIcon');
                 $(ARAPanel).toggleClass('openDrawer closedDrawer');
             }
 
@@ -862,11 +868,11 @@ export function initRossMods() {
 
     $(ARAPin).prop('checked', LoadLocalBool("ARALockOn"));
     if (LoadLocalBool("ARALockOn") == true) {
-        //console.log('setting pin class via local var');
+        console.debug('setting ARAPin class via local var');
         $(ARAPanel).addClass('pinnedOpen');
     }
-    if ($(ARAPin).prop('checked' == true)) {
-        console.log('setting pin class via checkbox state');
+    if (!!$(ARAPin).prop('checked')) {
+        console.debug('setting ARAPin class via checkbox state');
         $(ARAPanel).addClass('pinnedOpen');
     }
 
@@ -894,8 +900,8 @@ export function initRossMods() {
     //save state of ARA being open or closed
     $("#AraDrawerIcon").on("click", function () {
         if (!$("#AraDrawerIcon").hasClass('openIcon')) {
-            SaveLocal('AraOpened', 'true');
-        } else { SaveLocal('AraOpened', 'false'); }
+            SaveLocal('ARANavOpened', 'true');
+        } else { SaveLocal('ARANavOpened', 'false'); }
     });
 
     var chatbarInFocus = false;
@@ -1172,6 +1178,12 @@ export function initRossMods() {
             if ($("#left-nav-panel").is(":visible") &&
                 $(LPanelPin).prop('checked') === false) {
                 $("#leftNavDrawerIcon").trigger('click');
+                return
+            }
+
+            if ($("#ara-panel").is(":visible") &&
+                $(ARAPin).prop('checked') === false) {
+                $("#AraDrawerIcon").trigger('click');
                 return
             }
 
