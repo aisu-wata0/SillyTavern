@@ -990,6 +990,9 @@ function checkQuotaError(data) {
 }
 
 async function fetchWithTimeout(url, ms, post) {
+    if (!ms) {
+        ms = 20000
+    }
     const timeout = new Promise((resolve, reject) => {
         setTimeout(reject, ms, 'Timeout');
     });
@@ -1004,7 +1007,7 @@ async function fetchWithTimeout(url, ms, post) {
 
 // ARA
 
-const ARA_config_default_txt = "{\n    // Might show some extra behind the scenes info to you on tavern\n    debug: false,\n\n    summary: {\n      // # Auto Summary\n      /** Automatically retry if summary fails.\n      Usually when the generated summary happens to be too large.\n      Or on `auto_swipe_blacklist` (this setting is model specific).\n      You'll get an error if all of the tries fail. */\n      retryAttempts: 2,\n\n      /** Summary size is measured in tokens.\n      The size of the summary in your context is based on the largest summary you have registered for that chat.\n      Keep that in mind when making/editting/testing the summary prompts.\n\n      This is the initial estimate, for when messages first start going out of context\n      Any (first) summary with more tokens than `bufferInitial` will get rejected\n      On my tests on a single chat with the same prompt and history it varied between 50 to 110\n      It's big to be safe right now. If you want to test it and come up with an optimal number go ahead, but\n      Auto Summaries's sizes are highly dependant on your summary.prompt definitions, which come later. */\n      bufferInitial: 160,\n      /** `bufferEstimatePad` accounts for the size difference between summaries, i.e. the current biggest one and the next one, which will account for more chats.\n      Lower it if you want, as much as you can until you start getting \"Summary too big\" errors. */\n      bufferEstimatePad: 100,\n      /** ## After a finished prompt reply from the AI, preemptively generate summary for next prompt */\n      preemptive: true,\n      /** When preemptively prompting, to estimate user prompt size, look at the last `UserMsgEstimateLookback` user prompt's token sizes */\n      preemptiveUserMsgEstimateLookback: 10,\n      /** Whether to remove the game/terminal/code block part of the replies when making a summary */\n      removeResultBlocks: true,\n    },\n\n\n    // Uses what the user sends on the request, or fallback to default\n    // model: 'claude', // Optional, This overrides what is sent by tavern, to use the settings defined below with the same name\n\n    models: {\n      /** The name of the model is the name sent by tavern on the request, you can make sure of it on the browser's console, or on debug information */\n      put_your_model_name_here: {\n        // copy and edit whatever configs you want from default's (below)\n        // no need to copy them all, only what you want to edit\n      },\n      /** whatever setting isn't defined in your specific model config will fallback to these defaults. */\n      default: {\n        /* For token count calculation. Claude uses \"Assistant:\", OpenAI should use something similar so its ok. */\n        message_overhead: \"Assistant:\",\n\n        // Change from Tavern's unchangeable \"chat\"'s start to something else\n        startNewChatMsg    : \"[Start a new chat]\",\n        startNewChatReplace: \"[Story start]\",\n        // startNewChatReplace: \"[Start a new chat]\",\n\n        summary: {\n          /** The summary of the chat will be added to your prompt between these two messages: */\n          summary_intro: \"[Author's notes of the story so far]\",\n          // summary here, after `summary_intro`\n          story_continuation: \"[Story continuation]\",\n          // chat history that fits the context here, after `story_continuation`\n\n          /** Filter (only) the first line of the automatic summary reply if it contains these words. */\n          firstLineFilter: [\n            \"summary\",\n            \"notes\",\n          ],\n          /** A certain AI likes to impersonate the Human, this is a countermeasure to that */\n          cropAfterMatchRegex: [\n            \"\\nHuman:\",\n            \"\\nH:\",\n          ],\n          /**\n           * The Auto Summary only summarizes messages out of context (OOC)\n           * It gathers all OOC messages and prepares a prompt like this (things in brackets are prompts defined in here, below):\n           *\n           * {summary.prompt.introduction}\n           * [Card]\n           * {startNewChatReplace}\n           * [... OOC messages]\n           * {summary.prompt.jailbreak}\n           *\n           * Of course there will come a point where the OOC messages won't themselves fit on a single prompt\n           * So a previous summary is used, to cover the OOC messages that are now OOC^2.\n           *\n           * {summary.prompt.revsion.introduction}\n           * [Card]\n           * {startNewChatReplace}\n           * {summary.prompt.revsion.previous_summary_start}\n           * [previous summary here that covers just before the new OOC]\n           * {summary.prompt.revsion.messages_continuation}\n           * [... OOC messages starting from just after the summary above]\n           * {summary.prompt.revsion.jailbreak}\n           *\n           */\n          prompt: {\n            introduction: `The following text is a story you were writing over your replies, starting with the instructions, setting, context, character definitions, and initial conditions you were given to write it.\nYou will be asked to create concise author's notes for the story at the end.\n`,\n            // [Card]\n            // [OOC messages]\n            jailbreak: `[The above is all of the story written so far.]\nCreate your author notes about the story up to now.\nWrite these notes for you to use for continue writing this story in the future, knowing that you'll have no other info aside from these notes, and the info before \"[Story start]\", i.e. the setting, context, character definitions, and initial conditions.\nAvoid including any details from before the story started, meaning the setting, context, character definitions, and initial conditions. Which means completely avoiding including characters' initial age, appearance and personality for example.\nIn short, include only new information that is after \"[Story start]\", don't include information already contained before \"[Story start]\" and above.\nThis is exclusively for the continuation for the story, to maintain consistency and reference events and their outcomes in the future.\nSo write down established facts, unless they've been overshadowed by others later.\nAlways include the relationships of people that might interact again in the future.\nRemove elements you think won't be relevant again in the future, like throwaway characters, but briefly mention experiences the main characters had or learned, unless they've been overshadowed other lessons later in the story that you'll include.\nThere's no need to write \"[Author's notes]\" on your reply or otherwise mention what they are.\nMake them EXTREMELY concise.\n`,\n\n\n            // summary prompts for revision\n            revision: {\n              // These are notes only for the future story\n              introduction: `The following text is a story you were writing over your replies, starting with the instructions, setting, context, character definitions, and initial conditions you were given to write it.\n  Right after that start, I'll show you your previous notes about the story, which has information from the start of the story up to the point the story will then continue.\n  You will be asked to revise those notes, including into them what more happened in the continuation of the story after them.\\n`,\n              // [Card]\n              previous_summary_start: `[Story start. Your previous notes about what happened since the start below, starting from the beginning of the story.]`,\n              // [Previous summary (OOC^2 messages)]\n              messages_continuation: `[End of previous notes. Below is the continuation of the story, which will contain new information.]`,\n              // [OOC messages (most recent)]\n              jailbreak: `[The above is all of the story written so far.]\n  Revise your previous notes at the start of the story to include everything in story so far, from the beginning.\n  Avoid including any details from before the story started, meaning the setting, context, character definitions, and initial conditions. Which means completely avoiding including characters' initial age, appearance and personality for example.\n  Include only information that is in your summary and in the continuation of the story below it, don't include information already contained before the summary and above.\n  This is exclusively for the continuation for the story, to maintain consistency and reference events and their outcomes in the future.\n  So write down established facts, unless they've been overshadowed by others later.\n  Always include the relationships of people that might interact again in the future.\n  Remove elements you think won't be relevant again in the future, like throwaway characters, but briefly mention experiences the main characters had or learned, unless they've been overshadowed other lessons later in the story that you'll include.\n  There's no need to write \"[Author's notes]\" on your reply or otherwise mention what they are.\n  Make them EXTREMELY concise, under 300 words.\n  `,\n            },\n          },\n        },\n\n        /** Be careful with `auto_swipe_minimum_length`, as it will not allow short messages through, set it to 0 if this is undersirable\n         * 0 to disable */\n        auto_swipe_minimum_length: 0,\n        /** If enough words on the blacklist are contained in the response, auto retry\n         * 0 to disable */\n        auto_swipe_blacklist_threshold: 2,\n        auto_swipe_blacklist: [\n          \"ethical(ly)?\",\n          \"unethical\",\n          \"guidelines?\",\n          \"harmful\",\n          \"illegal\",\n          \"(un)?comfortable\",\n          \"engage\",\n          \"generat(e|ing)\",\n          \"nonconsensual\",\n          \"I apologize\",\n          \"My apologies\",\n          \"upon further reflection\",\n          \"continue this story\",\n          \"(unable to|not|cannot) (continue|respond|provide|appropriate|assist)\",\n          \"inappropriate\",\n          \"content\",\n        ],\n\n        /** These `user`, `assistant`, are only used to replace {({user})}, {({assistant})} in the card, if its used at all */\n        user: \"Human\",\n        assistant: \"Assistant\",\n      },\n    },\n\n    // ## Parsing stuff\n    /** Where the card's game config is  */\n    re_game_pattern: \"```(js|javascript)\\\\s*\\\\n\\\\s*\\\\/\\\\/\\\\s*#!AbsoluteRpgAdventure.*\\\\n\\\\s*(?<config>[\\\\S\\\\s]+return\\\\s*game\\\\s*;?)\\\\s*\\\\n```\",\n    re_config_pattern: \"  config:\\\\s*(?<config>{\\\\s*\\\\n[\\\\S\\\\s]+?\\n  }),\",\n\n    /** Stuff in the card withing this region will get omitted when doing summary prompts */\n    gameMechanicsCardSectionStartRegex: \"\\\\n# (RPG )?Game Mechanics\",\n    nextCardSectionStartRegex: '\\\\n# ',\n\n    // # Game\n    game: {\n      /** ### Sheet data injection */\n      injection: {\n        /**\n         * How information is injected on the last messages\n         *\n         * - `content` is the message's original content;\n         * - `cardJailbreaks` are the jailbreaks defined on the card (only in my style/format, the cardJailbreak sections, not the Tavern native one);\n         * - `stat_jailbreak` is only for RPG cards ({stat_jailbreak} is automatically not included if its not an RPG, no need to change this yourself); `stat_jailbreak`'s format is defined in the card's game config `format_stat_jailbreak`;\n         *\n         *  If you don't want even card jailbreaks to be injected, the formats would be set only to \"{content}\"\n         *\n         * Default settings mean that the stat sheet will be injected before your user prompt, as if the user was manually tracking the stats for the AI.\n         *   Its like this because putting it in the system can make the AI (Claude in the tests) reply with the stat sheet itself at the end of its message for some reason. (not thoroughly tested, but seemed that way)\n         *\n         * For example:\n        format_system: `{cardJailbreaks}\\n{content}`,\n        format_user  : `{stat_jailbreak}\\n{content}`,\n         * Would mean that the jailbreaks on the card are added to before Tavern's JB, and game stats would be before the user's prompt (so right after the assistant's replied game/results block in triple backtick)\n         * \n         */\n        format_system: `{cardJailbreaks}\\n{content}`,\n        format_user  : `{stat_jailbreak}\\n{content}`,\n        /** `format_user` is used if the last message is not a system message (e.g. the user has no Jailbreak), instead of `format`, if you want to define different behavior; It make sense if you change regular `format` so that `cardJailbreaks` comes before `content`, because you can then keep `format_user` with `content` before `cardJailbreaks`; */\n\n        /** Cards might have multiple jailbreaks, `cardJailbreaksJoin` is used to join them */\n        cardJailbreaksJoin: `\\n`,\n        /** Whether to check cardInjections against given Tavern jailbreak and filtering duplicate lines */\n        removeDuplicatesFromTavern: true,\n        /** Whether jailbreak duplicates are checked line by line, not recommended, especially if your jbs have short, non-specific, lines */\n        removeDuplicatesFromTavernByLine: false,\n      },\n      /**\n       * ## Game settings\n       *\n       * Those that make sense to be possibly user defined, rather than card defined, anyway\n       * All these substitute, or add to, settings defined on the card\n       * (They substitute or add based on `mechanics_config_overwrite` below)\n       * Be careful to not break cards\n       */\n      mechanics_config_overwrite: {\n        'number': 'overwrite',\n        'string': 'overwrite',\n        'list': 'concat',\n        // '', 'overwrite', 'add', 'concat',\n        // '' will ignore matches and do nothing\n      },\n      mechanics: {\n        stats: {\n          quests: {\n            filteredNames: [\n              \"Caution\",\n              \"Error\",\n              \"Warning\",\n              \"Note\",\n              \"Skills*( +(Events*))?\",\n              \"Quests*( +(Events*|PROGRESS*|STARTs*|Received|Available))?\",\n              \"Events*\",\n              \"STARTs*\",\n              \"PROGRESS*\",\n              \"Results*\",\n              \"(no)? *Events*\",\n              \"(no)? *Skills*\",\n              \"no*\",\n              \"yes*\",\n              \"\\d+\",\n            ],\n\n            /**\n             * (NOT implemented)\n            /** TODO Auto abandon quests TOO old (measured by prompt number) */\n            questAgeThreshold: 40,\n            /** TODO Auto abandon oldest quests when you have too many */\n            questCountLimit: 40,\n          },\n        },\n      },\n\n      /** # Character sheet */\n      sheet: {\n        style: {\n        },\n      },\n    },\n\n    // # Prompt formatting\n    // Send past user prompts or filter them out?\n    send_past_user_prompts: true,\n    results: {\n      /** Get game data only from assistant */\n      onlyAssistant: true,\n      /** If a single message has multiple code blocks, use only the last one when true */\n      onlyLast: false,\n\n      /** Whether to remove game/terminal/code block/results from chat history when prompting, downsides: confuse the model; upside: gain context tokens;\n      Hunch is that this is extremely non-advised. I didn't even test this. */\n      removeResultBlocks: false,\n\n      /** keep the lastest result block?\n       * If you keep it, will it get confused by thinking those were the results of the entire chat up to now?\n       * If you remove it, it will have examples to keep consistency...\n       * I'd rather just keep them all, but it's a setting I guess.  */\n      keepLastResultBlock: true,\n    },\n\n    // # Fallbacks\n    /** Fallback {({user})}, only in exceptional cases */\n    userName: \"Human\",\n    /** Tavern's context size setting is used, but `context_max_tokens` is used if somehow user doesn't provide any */\n    context_max_tokens: 5800,\n  }"
+const ARA_config_default_txt = "{\n    // Might show some extra behind the scenes info to you on tavern\n    debug: false,\n\n    summary: {\n      // # Auto Summary\n      /** Automatically retry if summary fails.\n      Usually when the generated summary happens to be too large.\n      Or on `auto_swipe_blacklist` (this setting is model specific).\n      You'll get an error if all of the tries fail. */\n      retryAttempts: 2,\n\n      /** Summary size is measured in tokens.\n      The size of the summary in your context is based on the largest summary you have registered for that chat.\n      Keep that in mind when making/editting/testing the summary prompts.\n\n      This is the initial estimate, for when messages first start going out of context\n      Any (first) summary with more tokens than `bufferInitial` will get rejected\n      On my tests on a single chat with the same prompt and history it varied between 50 to 110\n      It's big to be safe right now. If you want to test it and come up with an optimal number go ahead, but\n      Auto Summaries's sizes are highly dependant on your summary.prompt definitions, which come later. */\n      bufferInitial: 200,\n      /** `bufferEstimatePad` accounts for the size difference between summaries, i.e. the current biggest one and the next one, which will account for more chats.\n      Lower it if you want, as much as you can until you start getting \"Summary too big\" errors. */\n      bufferEstimatePad: 80,\n      /** ## After a finished prompt reply from the AI, preemptively generate summary for next prompt */\n      preemptive: true,\n      /** When preemptively prompting, to estimate user prompt size, look at the last `UserMsgEstimateLookback` user prompt's token sizes */\n      preemptiveUserMsgEstimateLookback: 10,\n      /** Whether to remove the game/terminal/code block part of the replies when making a summary */\n      removeResultBlocks: true,\n    },\n\n\n    // Uses what the user sends on the request, or fallback to default\n    // model: 'claude', // Optional, This overrides what is sent by tavern, to use the settings defined below with the same name\n\n    models: {\n      /** The name of the model is the name sent by tavern on the request, you can make sure of it on the browser's console, or on debug information */\n      put_your_model_name_here: {\n        // copy and edit whatever configs you want from default's (below)\n        // no need to copy them all, only what you want to edit\n      },\n      /** whatever setting isn't defined in your specific model config will fallback to these defaults. */\n      default: {\n        /* For token count calculation. Claude uses \"Assistant:\", OpenAI should use something similar so its ok. */\n        message_overhead: \"Assistant:\",\n\n        // Change from Tavern's unchangeable \"chat\"'s start to something else\n        startNewChatMsg    : \"[Start a new chat]\",\n        startNewChatReplace: \"[Story start]\",\n        // startNewChatReplace: \"[Start a new chat]\",\n\n        summary: {\n          /** The summary of the chat will be added to your prompt between these two messages: */\n          summary_intro: \"<Summary of the story so far>\",\n          // summary here, after `summary_intro`\n          story_continuation: \"</Summary of the story so far>\",\n          // chat history that fits the context here, after `story_continuation`\n\n          /** Filter (only) the first line of the automatic summary reply if it contains these words. */\n          firstLineFilter: [\n            \"summary\",\n            \"notes\",\n            \"disclaimer\",\n          ],\n          lastLineFilter: [\n            \"summary\",\n            \"notes\",\n            \"disclaimer\",\n          ],\n          /** A certain AI likes to impersonate the Human, this is a countermeasure to that */\n          cropAfterMatchRegex: [\n            \"\\nHuman:\",\n            \"\\nH:\",\n          ],\n          cardSections: {\n            /** Stuff in the card within these regions will get omitted when doing summary prompts */\n            remove_on_summary: {\n              paragraph_thinking: {\n                regexStart: \"\\\\n\\\\s*<(?<title>(Story|Paragraph|(((lit)?RPG|Game) )*Mechanics?) (Thinking|Planning|Review)( (definition|template))?)>\",\n                regexEnd: \"\\\\n\\\\s*</(?<title>(Story|Paragraph|(((lit)?RPG|Game) )*Mechanics?) (Thinking|Planning|Review)( (definition|template))?)>\",\n              },\n              context: {\n                regexStart: \"\\\\n\\\\s*<(?<title>Circumstances? and context( of the story( game)?)?)>\",\n                regexEnd: \"\\\\n\\\\s*</(?<title>Circumstances? and context( of the story( game)?)?)>\",\n              },\n            },\n          },\n          /**\n           * The Auto Summary only summarizes messages out of context (OOC)\n           * It gathers all OOC messages and prepares a prompt like this (things in brackets are prompts defined in here, below):\n           *\n           * {summary.prompt.introduction}\n           * [Card]\n           * {startNewChatReplace}\n           * [... OOC messages]\n           * {summary.prompt.jailbreak}\n           *\n           * Of course there will come a point where the OOC messages won't themselves fit on a single prompt\n           * So a previous summary is used, to cover the OOC messages that are now OOC^2.\n           *\n           * {summary.prompt.revsion.introduction}\n           * [Card]\n           * {startNewChatReplace}\n           * {summary.prompt.revsion.previous_summary_start}\n           * [previous summary here that covers just before the new OOC]\n           * {summary.prompt.revsion.messages_continuation}\n           * [... OOC messages starting from just after the summary above]\n           * {summary.prompt.revsion.jailbreak}\n           *\n           */\n          prompt: {\n            introduction: `\nThe following text, <Story Definitions>, is a set of definitions for a story you were writing, the setting, context, character definitions, instructions, and initial conditions you were given to write it.\nAfter it, the <Story> that was written up to now based on those definitions.\nYou will be asked at  the end to update and revise the <Summary>, including into it what more happened in the continuation of the story after the <Summary>.\n\n<Story Definitions>\n`,\n            // [Card]\n            after_card: `\n</Story Definitions>\n<Story>\n`,\n            // [OOC messages]\n            jailbreak: `\n</Story>\n[The above is all of the story written so far.]\n\n<Summary Rules>\n- Write these notes/summary to be used for writing the continuation of this story in the future, knowing that you'll have no other info aside from these notes/summary and <Story Definitions> (the info before the story started (i.e. the setting, context, character definitions, and initial conditions)).\n- Include only new information that is after the story started, don't include information already contained/defined beforehand.Completely avoid including anything defined/established before the story actually started, as everything about the characters established before the story started will be known, so assume the characters and their traits defined beforehand are known, (also assume anything else defined before hand is known: the setting, context, character definitions, and initial conditions). Which means completely avoiding including characters' initial age, appearance, and personality, if they were defined beforehand, for example.\n- Write down facts established after the story started, unless they've been overshadowed by others later. This summary is exclusively for the continuation for the story, to maintain consistency and reference events and their outcomes in the future.\n- Always include the relationships of people that might interact again in the future.\n- Remove elements you think won't be relevant again in the future, but briefly mention experiences the main characters had or learned, unless they've been overshadowed other lessons later in the story that you'll include.\n- There's no need to write \"[Author's notes]\" on your reply or otherwise mention what they are.\n- Make them EXTREMELY concise and use bullet points.\n</Summary rules>\n\n[Create a summary about the story, since its start, up to now, following <Summary Rules>.]\n`,\n\n\n            // summary prompts for revision\n            revision: {\n              // These are notes only for the future story\n              introduction: `\nThe following text, <Story Definitions>, is a set of definitions for a story you were writing, the setting, context, character definitions, instructions, and initial conditions you were given to write it.\nAfter it, the <Story> that was written up to now based on those definitions.\nOn the begginning of the <Story>, there will be a <Summary>, which has information from the start of the story up to the point the story will then continue below it.\nYou will be asked at  the end to update and revise the <Summary>, including into it what more happened in the continuation of the story after the <Summary>.\n\n<Story Definitions>\n`,\n              // [Card]\n              previous_summary_start: `\n</Story Definitions>\n<Story>\n<Summary>\n`,\n              // [Previous summary (OOC^2 messages)]\n              messages_continuation: `\n</Summary>\n[End of summary. Below is the continuation of the story.]\n`,\n              // [OOC messages (most recent)]\n              jailbreak: `\n</Story>\n[The above is all of the story written so far.]\n\n<Summary Update Rules>\n- Write these notes/summary to be used for writing the continuation of this story in the future, knowing that you'll have no other info aside from these notes/summary and <Story Definitions> (the info before the story started (i.e. the setting, context, character definitions, and initial conditions)).\n- Include only new information that is after the story started, don't include information already contained/defined beforehand.Completely avoid including anything defined/established before the story actually started, as everything about the characters established before the story started will be known, so assume the characters and their traits defined beforehand are known, (also assume anything else defined before hand is known: the setting, context, character definitions, and initial conditions). Which means completely avoiding including characters' initial age, appearance, and personality, if they were defined beforehand, for example.\n- Write down facts established after the story started, unless they've been overshadowed by others later. This summary is exclusively for the continuation for the story, to maintain consistency and reference events and their outcomes in the future.\n- Always include the relationships of people that might interact again in the future.\n- Remove elements you think won't be relevant again in the future, but briefly mention experiences the main characters had or learned, unless they've been overshadowed other lessons later in the story that you'll include.\n- There's no need to write \"[Author's notes]\" on your reply or otherwise mention what they are.\n- Make them EXTREMELY concise and use bullet points.\n</Summary Update Rules>\n\n[Update and revise your previous <Summary> (on the begginning of the <Story>), to include everything written in the story so far, from the beginning, following <Summary Update Rules>.]\n  `,\n            },\n          },\n        },\n\n        /** Be careful with `auto_swipe_minimum_length`, as it will not allow short messages through, set it to 0 if this is undersirable\n         * 0 to disable */\n        auto_swipe_minimum_length: 0,\n        /** If enough words on the blacklist are contained in the response, auto retry\n         * 0 to disable */\n        auto_swipe_blacklist_threshold: 2,\n        auto_swipe_blacklist: [\n          \"ethical(ly)?\",\n          \"unethical\",\n          \"guidelines?\",\n          \"harmful\",\n          \"illegal\",\n          \"(un)?comfortable\",\n          \"engage\",\n          \"generat(e|ing)\",\n          \"nonconsensual\",\n          \"I apologize\",\n          \"My apologies\",\n          \"upon further reflection\",\n          \"continue this story\",\n          \"(unable to|not|cannot) (continue|respond|provide|appropriate|assist)\",\n          \"inappropriate\",\n          \"content\",\n        ],\n\n        /** These `user`, `assistant`, are only used to replace {({user})}, {({assistant})} in the card, if its used at all */\n        user: \"Human\",\n        assistant: \"Assistant\",\n      },\n    },\n\n    // ## Parsing stuff\n    /** Where the card's game config is  */\n    re_game_pattern: \"```(js|javascript)\\\\s*\\\\n\\\\s*\\\\/\\\\/\\\\s*#!AbsoluteRpgAdventure.*\\\\n\\\\s*(?<config>[\\\\S\\\\s]+return\\\\s*game\\\\s*;?)\\\\s*\\\\n```\",\n    re_config_pattern: \"  config:\\\\s*(?<config>{\\\\s*\\\\n[\\\\S\\\\s]+?\\n  }),\",\n\n    // # Game\n    game: {\n      /** ### Sheet data injection */\n      injection: {\n        /**\n         * How information is injected on the last messages\n         *\n         * - `content` is the message's original content;\n         * - `cardJailbreaks` are the jailbreaks defined on the card (only in my style/format, the cardJailbreak sections, not the Tavern native one);\n         * - `stat_jailbreak` is only for RPG cards ({stat_jailbreak} is automatically not included if its not an RPG, no need to change this yourself); `stat_jailbreak`'s format is defined in the card's game config `format_stat_jailbreak`;\n         *\n         *  If you don't want even card jailbreaks to be injected, the formats would be set only to \"{content}\"\n         *\n         * Default settings mean that the stat sheet will be injected before your user prompt, as if the user was manually tracking the stats for the AI.\n         *   Its like this because putting it in the system can make the AI (Claude in the tests) reply with the stat sheet itself at the end of its message for some reason. (not thoroughly tested, but seemed that way)\n         *\n         * For example:\n        format_system: `{cardJailbreaks}\\n{content}`,\n        format_user  : `{stat_jailbreak}\\n{content}`,\n         * Would mean that the jailbreaks on the card are added to before Tavern's JB, and game stats would be before the user's prompt (so right after the assistant's replied game/results block in triple backtick)\n         * \n         */\n        format_system: `{cardJailbreaks}\\n{content}`,\n        format_user  : `{stat_jailbreak}\\n{content}`,\n        /** `format_user` is used if the last message is not a system message (e.g. the user has no Jailbreak), instead of `format`, if you want to define different behavior; It make sense if you change regular `format` so that `cardJailbreaks` comes before `content`, because you can then keep `format_user` with `content` before `cardJailbreaks`; */\n\n        /** Cards might have multiple jailbreaks, `cardJailbreaksJoin` is used to join them */\n        cardJailbreaksJoin: `\\n`,\n        /** Whether to check cardInjections against given Tavern jailbreak and filtering duplicate lines */\n        removeDuplicatesFromTavern: true,\n        /** Whether jailbreak duplicates are checked line by line, not recommended, especially if your jbs have short, non-specific, lines */\n        removeDuplicatesFromTavernByLine: false,\n      },\n      /**\n       * ## Game settings\n       *\n       * Those that make sense to be possibly user defined, rather than card defined, anyway\n       * All these substitute, or add to, settings defined on the card\n       * (They substitute or add based on `mechanics_config_overwrite` below)\n       * Be careful to not break cards\n       */\n      mechanics_config_overwrite: {\n        'number': 'overwrite',\n        'string': 'overwrite',\n        'list': 'concat',\n        // '', 'overwrite', 'add', 'concat',\n        // '' will ignore matches and do nothing\n      },\n      mechanics: {\n        stats: {\n          quests: {\n            filteredNames: [\n              \"Caution\",\n              \"Error\",\n              \"Warning\",\n              \"Note\",\n              \"Skills*( +(Events*))?\",\n              \"Quests*( +(Events*|PROGRESS*|STARTs*|Received|Available))?\",\n              \"Events*\",\n              \"STARTs*\",\n              \"PROGRESS*\",\n              \"Results*\",\n              \"(no)? *Events*\",\n              \"(no)? *Skills*\",\n              \"no*\",\n              \"yes*\",\n              \"\\d+\",\n            ],\n\n            /**\n             * (NOT implemented)\n            /** TODO Auto abandon quests TOO old (measured by prompt number) */\n            questAgeThreshold: 40,\n            /** TODO Auto abandon oldest quests when you have too many */\n            questCountLimit: 40,\n          },\n        },\n      },\n\n      /** # Character sheet */\n      sheet: {\n        style: {\n        },\n      },\n    },\n\n    // # Prompt formatting\n    // Send past user prompts or filter them out?\n    send_past_user_prompts: true,\n    results: {\n      /** Get game data only from assistant */\n      onlyAssistant: true,\n      /** If a single message has multiple code blocks, use only the last one when true */\n      onlyLast: false,\n\n      /** Whether to remove game/terminal/code block/results from chat history when prompting, downsides: confuse the model; upside: gain context tokens;\n      Hunch is that this is extremely non-advised. I didn't even test this. */\n      removeResultBlocks: false,\n\n      /** keep the lastest result block?\n       * If you keep it, will it get confused by thinking those were the results of the entire chat up to now?\n       * If you remove it, it will have examples to keep consistency...\n       * I'd rather just keep them all, but it's a setting I guess.  */\n      keepLastResultBlock: true,\n    },\n\n    request_timeout_ms: 40000,\n    // # Fallbacks\n    /** Fallback {({user})}, only in exceptional cases */\n    userName: \"Human\",\n    /** Tavern's context size setting is used, but `context_max_tokens` is used if somehow user doesn't provide any */\n    context_max_tokens: 5800,\n  }"
 
 const drawerTogglers = document.querySelectorAll('.ARA-drawer_toggler');
 
@@ -1045,7 +1048,7 @@ let ARA_local = {
     chats: {},
     summary_current: {
         chat_id: null,
-        idxEndGlobal: -1,
+        idxEndGlobal: "-1",
     },
     regeneratingSummary: false,
 
@@ -1069,12 +1072,13 @@ function ARA_summary_request() {
     }
     let summary = chat.summaries[ARA_local.summary_current.idxEndGlobal]
     if (!summary) {
-        console.warn("Summary idx selected doesn't exist", "summary_current", ARA_local.summary_current, "summaries", chat.summaries)
+        console.warn("Summary idx selected doesn't exist", "summary_current.idxEndGlobal =", ARA_local.summary_current.idxEndGlobal, "summary_current", ARA_local.summary_current, "summaries", chat.summaries)
         const l = chat_summaries_keys(chat)
         if (l.length == 0) {
             console.warn("Summaries empty", "summary_current", ARA_local.summary_current, "chat", chat)
             return null
         }
+        // fix it, but return null
         ARA_local.summary_current.idxEndGlobal = l[l.length - 1]
     }
     return summary
@@ -1082,7 +1086,7 @@ function ARA_summary_request() {
 
 function ARA_summaries_flatten_to_last(summaries) {
     let summaries_new = {}
-    for (let idxEndGlobal in summaries) {
+    for (const idxEndGlobal in summaries) {
         let s_list = summaries[idxEndGlobal]
         if (Array.isArray(s_list)) {
             summaries_new[idxEndGlobal] = s_list[s_list.length - 1]
@@ -1130,9 +1134,13 @@ async function ARA_summary_update(data) {
                 // if idx to be removed is equal to current idx
                 // either change it to the previous valid one, or mark it for change if the previous idx is itself (happens when current idx is the first summary of all)
                 if (idxEndGlobal == ARA_local.summary_current.idxEndGlobal) {
+                    // if hasn't changed OG yet
                     if (idxEndGlobal_prev == ARA_local.summary_current.idxEndGlobal) {
+                        // will be changed next valid Idx loop
                         change = true
-                    } else {
+                    }
+                    // else use latest valid Idx
+                    else {
                         ARA_local.summary_current.idxEndGlobal = idxEndGlobal_prev
                     }
                 }
@@ -1146,7 +1154,8 @@ async function ARA_summary_update(data) {
         }
         for (const idx of removed_summaries) {
             console.log("Absolute RPG Adventure:", "ARA_summary_update() summary removed (server sync)", idx, JSON.parse(JSON.stringify(chat.summaries[idx])))
-            delete chat.summaries[idx]
+            // Just don't delete! LOL
+            // delete chat.summaries[idx]
         }
         console.log("Absolute RPG Adventure:", "ARA_summary_update()", "chat", JSON.parse(JSON.stringify(chat)))
     }
@@ -1183,7 +1192,7 @@ function setSelectOptions(selectId, options, selected_option = null) {
 }
 
 function chat_summaries_keys(chat) {
-    return Object.keys(chat.summaries).map(x => String(x))
+    return Object.keys(chat.summaries)
 }
 
 async function ARA_summary_display() {
@@ -1195,14 +1204,14 @@ async function ARA_summary_display() {
     setSelectOptions("ARA-summary-chat_id-select", Object.keys(ARA_local.chats), chat_id)
 
     let chat = ARA_local.chats[chat_id]
-    let idxEndGlobal = summary_request.summary.idxEndGlobal
+    let idxEndGlobal = String(summary_request.summary.idxEndGlobal)
     let idxEndGlobal_list = chat_summaries_keys(chat)
     let idxEndGlobal_last = idxEndGlobal_list[idxEndGlobal_list.length - 1]
-    if (!idxEndGlobal_list.includes(String(idxEndGlobal))) {
-        console.log("Absolute RPG Adventure:", " summary idx not foundo on list; !idxEndGlobal_list.includes(idxEndGlobal);", "!", idxEndGlobal_list, "includes", idxEndGlobal)
+    if (!(idxEndGlobal in chat.summaries)) {
+        console.log("Absolute RPG Adventure:", " summary idx not found on list; !idxEndGlobal_list.includes(idxEndGlobal);", idxEndGlobal_list, "includes", idxEndGlobal, " == false")
         ARA_local.summary_current.idxEndGlobal = idxEndGlobal_last
         summary_request = ARA_summary_request()
-        idxEndGlobal = summary_request.summary.idxEndGlobal
+        idxEndGlobal = String(summary_request.summary.idxEndGlobal)
     }
     setSelectOptions("ARA-summary-idxEndGlobal-select", idxEndGlobal_list, idxEndGlobal)
 
@@ -1237,7 +1246,7 @@ function ARA_summary_add(summary_request) {
     }
     let chat_id = summary_request.chat_id
     let chat = ARA_local.chats[chat_id]
-    let idxEndGlobal = summary_request.summary.idxEndGlobal
+    let idxEndGlobal = String(summary_request.summary.idxEndGlobal)
     if (chat.summaries[idxEndGlobal]) {
         console.warn("Absolute RPG Adventure:", "ARA_summary_add()", "Existing summary request", JSON.parse(JSON.stringify(chat.summaries[idxEndGlobal])), "\n overwrite", chat.summaries[idxEndGlobal])
     }
@@ -1327,7 +1336,7 @@ function formatTextToHtml(text) {
 }
 
 function ARA_parse_txt(txt) {
-    const fn = new Function([], `return ${txt}`);
+    const fn = new Function(`return ${txt}`);
     return fn()
 }
 
@@ -1461,7 +1470,7 @@ async function ARA_summaryEditText() {
 
 async function ARA_summary_set_chat_id(chat_id) {
     let chat = ARA_local.chats[chat_id]
-    let summaries_idxs = Object.keys(chat.summaries)
+    let summaries_idxs = chat_summaries_keys(chat)
     // by default show the last summary
     let idxEndGlobal = summaries_idxs[summaries_idxs.length - 1]
     ARA_local.summary_current = {
@@ -1472,6 +1481,7 @@ async function ARA_summary_set_chat_id(chat_id) {
 }
 
 async function ARA_summary_set_idxEndGlobal(idxEndGlobal) {
+    idxEndGlobal = String(idxEndGlobal)
     ARA_local.summary_current = {
         ...ARA_local.summary_current,
         idxEndGlobal,
@@ -1557,7 +1567,7 @@ async function ARA_get() {
         fragment.delete('expires_in');
         window.location.hash = fragment.toString();
 
-        const expiresAt = new Date((Date.now() + expiresIn * 1000)).toUTCString();
+        const expiresAt = new Date((Date.now() + Number(expiresIn) * 1000)).toUTCString();
         ARA.accessToken = accessToken
         ARA.tokenType = tokenType
         ARA.expiresIn = expiresIn
@@ -1594,7 +1604,7 @@ async function ARA_get() {
             ARA.expiresIn = localStorage.getItem("ARA.expiresIn");
             ARA.expiresAt = localStorage.getItem("ARA.expiresAt");
             ARA.id = localStorage.getItem("ARA.id");
-            if (new Date(ARA.expiresAt) < Date.now()) {
+            if (new Date(ARA.expiresAt).getTime() < Date.now()) {
                 ARA.accessToken = null
                 localStorage.setItem("ARA.accessToken", accessToken);
                 errorMsg = "Login expired"
@@ -1625,6 +1635,7 @@ async function ARA_get() {
     document.querySelector('#absoluteRPGAdventureLoggedIn').innerHTML = "true";
     return ARA;
 }
+
 
 function ARA_showSheet(data) {
     if (data.game.sheet && data.game.sheet.render && data.game.sheet.render.text) {
@@ -1666,10 +1677,15 @@ function ARA_notLoggedIn() {
 }
 
 async function ARA_generateSummary(signal) {
+    const summary_request = ARA_summary_request()
+    if (!summary_request) {
+        console.error("Absolute RPG Adventure:", "ARA_generateSummary(): No summary request")
+        return null
+    }
     const generate_url = '/generate_openai';
     const response = await fetch(generate_url, {
         method: 'POST',
-        body: JSON.stringify(ARA_summary_request().summary.body),
+        body: JSON.stringify(summary_request.summary.body),
         headers: getRequestHeaders(),
         signal,
     });
@@ -1699,6 +1715,9 @@ function ARA_requestConfig() {
 async function ARA_summary_req_update(summary_text, edit, mock, signal = null) {
     const summary_request = ARA_summary_request()
     console.log("Absolute RPG Adventure:", "ARA_summary_req_update() ARA_summary()=", summary_request)
+    if (!summary_request) {
+        console.error("Absolute RPG Adventure:", "ARA_summary_req_update() Error: null summary_request", summary_request)
+    }
     let data = null;
     try {
         // Send back the summary
@@ -1780,7 +1799,7 @@ async function ARA_prompt(generate_data, chat_id, signal) {
         body: JSON.stringify(body),
         headers: getRequestHeaders(),
     }
-    const res = await fetchWithTimeout(absoluteRPGAdventureUrl + "/prompt", 10000, post);
+    const res = await fetchWithTimeout(absoluteRPGAdventureUrl + "/prompt", ARA_local.config.request_timeout_ms, post);
     let data = await res.json();
     if (data.game && data.game.error) {
         console.trace("Error:", "Absolute RPG Adventure:", data.game.error)
@@ -1878,6 +1897,9 @@ async function ARA_getResult(lastReply, chat_id, generate_data_prev, signal = nu
         ARA_notLoggedIn()
         return false
     }
+    if (!lastReply) {
+        return false
+    }
     const body = {
         lastReply,
         generate_data_prev,
@@ -1893,7 +1915,7 @@ async function ARA_getResult(lastReply, chat_id, generate_data_prev, signal = nu
         headers: getRequestHeaders(),
     }
     try {
-        const res = await fetchWithTimeout(absoluteRPGAdventureUrl + "/getResult", 5000, post);
+        const res = await fetchWithTimeout(absoluteRPGAdventureUrl + "/getResult", ARA_local.config.request_timeout_ms, post);
         const data = await res.json();
         ARA_show(data)
         ARA_summary_preemptive(data.game)
@@ -2307,7 +2329,13 @@ async function sendOpenAIRequest(type, openai_msgs_tosend, signal, chat_id) {
                 generate_data = data.generate_data
             }
         } catch (error) {
-            const errorMsg = "Absolute RPG Adventure: Failed on promptAbsoluteRPGAdventure: " + error.stack.toString();
+            console.error(error);
+            let errorMsg = "Absolute RPG Adventure: Failed on promptAbsoluteRPGAdventure: "
+            if (error.stack) {
+                errorMsg += error.stack.toString();
+            } else {
+                errorMsg += String(error)
+            }
             console.error(errorMsg);
             throw new Error(errorMsg);
         }
@@ -2373,7 +2401,7 @@ async function sendOpenAIRequest(type, openai_msgs_tosend, signal, chat_id) {
                         yield getMessage;
                     }
                     const unfinishedPairs = findUnfinishedPairs(getMessage)
-                    
+
                     if (unfinishedPairs[0].length == 0) {
                         yield getMessage;
                     } else {
