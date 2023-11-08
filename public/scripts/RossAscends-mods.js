@@ -51,6 +51,7 @@ var SelectedCharacterTab = document.getElementById("rm_button_selected_ch");
 
 var ARAPin = document.getElementById("ARA_button_panel_pin");
 var ARAPanel = document.getElementById("ara-panel")
+var AraDrawerIcon = document.getElementById("AraDrawerIcon")
 
 var AutoConnectCheckbox = document.getElementById("auto-connect-checkbox");
 var AutoLoadChatCheckbox = document.getElementById("auto-load-chat-checkbox");
@@ -825,7 +826,7 @@ export function initRossMods() {
 
             if ($(ARAPanel).hasClass('openDrawer') && $('.openDrawer').length > 1) {
                 $(ARAPanel).slideToggle(200, "swing");
-                // $(AraDrawerIcon).toggleClass('openIcon closedIcon');
+                $(AraDrawerIcon).toggleClass('openIcon closedIcon');
                 $(ARAPanel).toggleClass('openDrawer closedDrawer');
             }
 

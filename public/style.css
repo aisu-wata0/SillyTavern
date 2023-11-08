@@ -2192,7 +2192,7 @@ input[type='checkbox']:not(#nav-toggle):not(#rm_button_panel_pin):not(#lm_button
     place-content: center;
 }
 
-input[type='checkbox']:not(#nav-toggle):not(#rm_button_panel_pin):not(#lm_button_panel_pin):not(#WI_panel_pin):not(.del_checkbox) {
+input[type='checkbox']:not(#nav-toggle):not(#rm_button_panel_pin):not(#lm_button_panel_pin):not(#WI_panel_pin):not(.del_checkbox):not(#ARA_button_panel_pin) {
     display: grid;
 }
 
@@ -3054,6 +3054,7 @@ a {
 /*           Right nav panel and nav-toggle */
 /* ############################################################# */
 
+#ara-panel,
 #right-nav-panel {
     width: calc((100vw - var(--sheldWidth) - 2px) /2);
     width: calc((100svw - var(--sheldWidth) - 2px) /2);
