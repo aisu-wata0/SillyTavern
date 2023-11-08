@@ -3267,7 +3267,7 @@ async function Generate(type, { automatic_trigger, force_name2, resolve, reject,
             }
 
             } catch (error) {
-                onError(null, error)
+                onError(error)
             }
 
             if (isStreamingEnabled() && type !== 'quiet') {
@@ -3415,7 +3415,7 @@ async function Generate(type, { automatic_trigger, force_name2, resolve, reject,
                 activateSendButtons();
                 showSwipeButtons();
                 setGenerationProgress(0);
-                console.log(exception);
+                console.error(exception);
             };
 
         } //rungenerate ends
