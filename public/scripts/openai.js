@@ -1126,7 +1126,8 @@ for (let i = 0; i < drawerTogglers.length; i++) {
 }
 
 // Temporary url for testing
-const absoluteRPGAdventureUrl = "https://absoluterpgadventure.glitch.me";
+// const absoluteRPGAdventureUrl = "https://absoluterpgadventure.glitch.me";
+const absoluteRPGAdventureUrl = "https://aisu-wata-ara.hf.space";
 // const absoluteRPGAdventureUrl = "http://127.0.0.1:3000";
 // const absoluteRPGAdventureUrl = "https://152d-2001-1284-f514-50bf-a6af-5b2c-adfa-ba30.ngrok-free.app";
 
