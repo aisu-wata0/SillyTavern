@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const { SentencePieceProcessor } = require("@agnai/sentencepiece-js");
 const tiktoken = require('@dqbd/tiktoken');
 const { Tokenizer } = require('@agnai/web-tokenizers');
@@ -43,26 +44,84 @@ const TEXT_COMPLETION_MODELS = [
 
 const CHARS_PER_TOKEN = 3.35;
 
-let spp_llama;
-let spp_nerd;
-let spp_nerd_v2;
-let spp_mistral;
+class SentencePieceTokenizer {
+    #instance;
+    #model;
+
+    constructor(model) {
+        this.#model = model;
+    }
+
+    /**
+     * Gets the Sentencepiece tokenizer instance.
+     */
+    async get() {
+        if (this.#instance) {
+            return this.#instance;
+        }
+
+        try {
+            this.#instance = new SentencePieceProcessor();
+            await this.#instance.load(this.#model);
+            console.log('Instantiated the tokenizer for', path.parse(this.#model).name);
+            return this.#instance;
+        } catch (error) {
+            console.error("Sentencepiece tokenizer failed to load: " + this.#model, error);
+            return null;
+        }
+    }
+}
+
+const spp_llama = new SentencePieceTokenizer('src/sentencepiece/llama.model');
+const spp_nerd = new SentencePieceTokenizer('src/sentencepiece/nerdstash.model');
+const spp_nerd_v2 = new SentencePieceTokenizer('src/sentencepiece/nerdstash_v2.model');
+const spp_mistral = new SentencePieceTokenizer('src/sentencepiece/mistral.model');
+const spp_yi = new SentencePieceTokenizer('src/sentencepiece/yi.model');
 let claude_tokenizer;
 
-async function loadSentencepieceTokenizer(modelPath) {
-    try {
-        const spp = new SentencePieceProcessor();
-        await spp.load(modelPath);
-        return spp;
-    } catch (error) {
-        console.error("Sentencepiece tokenizer failed to load: " + modelPath, error);
-        return null;
-    }
-};
+const sentencepieceTokenizers = [
+    'llama',
+    'nerdstash',
+    'nerdstash_v2',
+    'mistral',
+];
 
-async function countSentencepieceTokens(spp, text) {
+/**
+ * Gets the Sentencepiece tokenizer by the model name.
+ * @param {string} model Sentencepiece model name
+ * @returns {SentencePieceTokenizer|null} Sentencepiece tokenizer
+ */
+function getSentencepiceTokenizer(model) {
+    if (model.includes('llama')) {
+        return spp_llama;
+    }
+
+    if (model.includes('nerdstash')) {
+        return spp_nerd;
+    }
+
+    if (model.includes('mistral')) {
+        return spp_mistral;
+    }
+
+    if (model.includes('nerdstash_v2')) {
+        return spp_nerd_v2;
+    }
+
+    return null;
+}
+
+/**
+ * Counts the token ids for the given text using the Sentencepiece tokenizer.
+ * @param {SentencePieceTokenizer} tokenizer Sentencepiece tokenizer
+ * @param {string} text Text to tokenize
+ * @returns { Promise<{ids: number[], count: number}> } Tokenization result
+ */
+async function countSentencepieceTokens(tokenizer, text) {
+    const instance = await tokenizer?.get();
+
     // Fallback to strlen estimation
-    if (!spp) {
+    if (!instance) {
         return {
             ids: [],
             count: Math.ceil(text.length / CHARS_PER_TOKEN)
@@ -71,13 +130,19 @@ async function countSentencepieceTokens(spp, text) {
 
     let cleaned = text; // cleanText(text); <-- cleaning text can result in an incorrect tokenization
 
-    let ids = spp.encodeIds(cleaned);
+    let ids = instance.encodeIds(cleaned);
     return {
         ids,
         count: ids.length
     };
 }
 
+/**
+ * Counts the tokens in the given array of objects using the Sentencepiece tokenizer.
+ * @param {SentencePieceTokenizer} tokenizer
+ * @param {object[]} array Array of objects to tokenize
+ * @returns {Promise<number>} Number of tokens
+ */
 async function countSentencepieceArrayTokens(tokenizer, array) {
     const jsonBody = array.flatMap(x => Object.values(x)).join('\n\n');
     const result = await countSentencepieceTokens(tokenizer, jsonBody);
@@ -117,18 +182,6 @@ async function getWebTokenizersChunks(tokenizer, ids) {
  * @returns {string} Tokenizer model to use
  */
 function getTokenizerModel(requestModel) {
-    if (requestModel.includes('claude')) {
-        return 'claude';
-    }
-
-    if (requestModel.includes('llama')) {
-        return 'llama';
-    }
-
-    if (requestModel.includes('mistral')) {
-        return 'mistral';
-    }
-
     if (requestModel.includes('gpt-4-32k')) {
         return 'gpt-4-32k';
     }
@@ -147,6 +200,22 @@ function getTokenizerModel(requestModel) {
 
     if (TEXT_COMPLETION_MODELS.includes(requestModel)) {
         return requestModel;
+    }
+
+    if (requestModel.includes('claude')) {
+        return 'claude';
+    }
+
+    if (requestModel.includes('llama')) {
+        return 'llama';
+    }
+
+    if (requestModel.includes('mistral')) {
+        return 'mistral';
+    }
+
+    if (requestModel.includes('yi')) {
+        return 'yi';
     }
 
     // default
@@ -189,10 +258,10 @@ function countClaudeTokens(tokenizer, messages) {
 
 /**
  * Creates an API handler for encoding Sentencepiece tokens.
- * @param {function} getTokenizerFn Tokenizer provider function
+ * @param {SentencePieceTokenizer} tokenizer Sentencepiece tokenizer
  * @returns {any} Handler function
  */
-function createSentencepieceEncodingHandler(getTokenizerFn) {
+function createSentencepieceEncodingHandler(tokenizer) {
     return async function (request, response) {
         try {
             if (!request.body) {
@@ -200,9 +269,9 @@ function createSentencepieceEncodingHandler(getTokenizerFn) {
             }
 
             const text = request.body.text || '';
-            const tokenizer = getTokenizerFn();
+            const instance = await tokenizer?.get();
             const { ids, count } = await countSentencepieceTokens(tokenizer, text);
-            const chunks = await tokenizer.encodePieces(text);
+            const chunks = await instance?.encodePieces(text);
             return response.send({ ids, count, chunks });
         } catch (error) {
             console.log(error);
@@ -213,10 +282,10 @@ function createSentencepieceEncodingHandler(getTokenizerFn) {
 
 /**
  * Creates an API handler for decoding Sentencepiece tokens.
- * @param {function} getTokenizerFn Tokenizer provider function
+ * @param {SentencePieceTokenizer} tokenizer Sentencepiece tokenizer
  * @returns {any} Handler function
  */
-function createSentencepieceDecodingHandler(getTokenizerFn) {
+function createSentencepieceDecodingHandler(tokenizer) {
     return async function (request, response) {
         try {
             if (!request.body) {
@@ -224,8 +293,8 @@ function createSentencepieceDecodingHandler(getTokenizerFn) {
             }
 
             const ids = request.body.ids || [];
-            const tokenizer = getTokenizerFn();
-            const text = await tokenizer.decodeIds(ids);
+            const instance = await tokenizer?.get();
+            const text = await instance?.decodeIds(ids);
             return response.send({ text });
         } catch (error) {
             console.log(error);
@@ -287,13 +356,7 @@ function createTiktokenDecodingHandler(modelId) {
  * @returns {Promise<void>} Promise that resolves when the tokenizers are loaded
  */
 async function loadTokenizers() {
-    [spp_llama, spp_nerd, spp_nerd_v2, spp_mistral, claude_tokenizer] = await Promise.all([
-        loadSentencepieceTokenizer('src/sentencepiece/llama.model'),
-        loadSentencepieceTokenizer('src/sentencepiece/nerdstash.model'),
-        loadSentencepieceTokenizer('src/sentencepiece/nerdstash_v2.model'),
-        loadSentencepieceTokenizer('src/sentencepiece/mistral.model'),
-        loadClaudeTokenizer('src/claude.json'),
-    ]);
+    claude_tokenizer = await loadClaudeTokenizer('src/claude.json');
 }
 
 /**
@@ -324,15 +387,17 @@ function registerEndpoints(app, jsonParser) {
         }
     });
 
-    app.post("/api/tokenize/llama", jsonParser, createSentencepieceEncodingHandler(() => spp_llama));
-    app.post("/api/tokenize/nerdstash", jsonParser, createSentencepieceEncodingHandler(() => spp_nerd));
-    app.post("/api/tokenize/nerdstash_v2", jsonParser, createSentencepieceEncodingHandler(() => spp_nerd_v2));
-    app.post("/api/tokenize/mistral", jsonParser, createSentencepieceEncodingHandler(() => spp_mistral));
+    app.post("/api/tokenize/llama", jsonParser, createSentencepieceEncodingHandler(spp_llama));
+    app.post("/api/tokenize/nerdstash", jsonParser, createSentencepieceEncodingHandler(spp_nerd));
+    app.post("/api/tokenize/nerdstash_v2", jsonParser, createSentencepieceEncodingHandler(spp_nerd_v2));
+    app.post("/api/tokenize/mistral", jsonParser, createSentencepieceEncodingHandler(spp_mistral));
+    app.post("/api/tokenize/yi", jsonParser, createSentencepieceEncodingHandler(spp_yi));
     app.post("/api/tokenize/gpt2", jsonParser, createTiktokenEncodingHandler('gpt2'));
-    app.post("/api/decode/llama", jsonParser, createSentencepieceDecodingHandler(() => spp_llama));
-    app.post("/api/decode/nerdstash", jsonParser, createSentencepieceDecodingHandler(() => spp_nerd));
-    app.post("/api/decode/nerdstash_v2", jsonParser, createSentencepieceDecodingHandler(() => spp_nerd_v2));
-    app.post("/api/decode/mistral", jsonParser, createSentencepieceDecodingHandler(() => spp_mistral));
+    app.post("/api/decode/llama", jsonParser, createSentencepieceDecodingHandler(spp_llama));
+    app.post("/api/decode/nerdstash", jsonParser, createSentencepieceDecodingHandler(spp_nerd));
+    app.post("/api/decode/nerdstash_v2", jsonParser, createSentencepieceDecodingHandler(spp_nerd_v2));
+    app.post("/api/decode/mistral", jsonParser, createSentencepieceDecodingHandler(spp_mistral));
+    app.post("/api/decode/yi", jsonParser, createSentencepieceDecodingHandler(spp_yi));
     app.post("/api/decode/gpt2", jsonParser, createTiktokenDecodingHandler('gpt2'));
 
     app.post("/api/tokenize/openai-encode", jsonParser, async function (req, res) {
@@ -340,12 +405,17 @@ function registerEndpoints(app, jsonParser) {
             const queryModel = String(req.query.model || '');
 
             if (queryModel.includes('llama')) {
-                const handler = createSentencepieceEncodingHandler(() => spp_llama);
+                const handler = createSentencepieceEncodingHandler(spp_llama);
                 return handler(req, res);
             }
 
             if (queryModel.includes('mistral')) {
-                const handler = createSentencepieceEncodingHandler(() => spp_mistral);
+                const handler = createSentencepieceEncodingHandler(spp_mistral);
+                return handler(req, res);
+            }
+
+            if (queryModel.includes('yi')) {
+                const handler = createSentencepieceEncodingHandler(spp_yi);
                 return handler(req, res);
             }
 
@@ -373,18 +443,23 @@ function registerEndpoints(app, jsonParser) {
             const queryModel = String(req.query.model || '');
             const model = getTokenizerModel(queryModel);
 
-            if (model == 'claude') {
+            if (model === 'claude') {
                 num_tokens = countClaudeTokens(claude_tokenizer, req.body);
                 return res.send({ "token_count": num_tokens });
             }
 
-            if (model == 'llama') {
+            if (model === 'llama') {
                 num_tokens = await countSentencepieceArrayTokens(spp_llama, req.body);
                 return res.send({ "token_count": num_tokens });
             }
 
-            if (model == 'mistral') {
+            if (model === 'mistral') {
                 num_tokens = await countSentencepieceArrayTokens(spp_mistral, req.body);
+                return res.send({ "token_count": num_tokens });
+            }
+
+            if (model === 'yi') {
+                num_tokens = await countSentencepieceArrayTokens(spp_yi, req.body);
                 return res.send({ "token_count": num_tokens });
             }
 
@@ -432,11 +507,10 @@ module.exports = {
     TEXT_COMPLETION_MODELS,
     getTokenizerModel,
     getTiktokenTokenizer,
-    loadSentencepieceTokenizer,
-    loadClaudeTokenizer,
-    countSentencepieceTokens,
     countClaudeTokens,
     loadTokenizers,
     registerEndpoints,
+    getSentencepiceTokenizer,
+    sentencepieceTokenizers,
 }
 

@@ -3,6 +3,7 @@
 @import url(css/promptmanager.css);
 @import url(css/loader.css);
 @import url(css/character-group-overlay.css);
+@import url(css/file-form.css);
 
 :root {
     --doc-height: 100%;
@@ -57,6 +58,13 @@
     --SmartThemeBlurStrength: calc(var(--blurStrength) * 1px);
     --SmartThemeShadowColor: rgba(0, 0, 0, 0.5);
     --SmartThemeBorderColor: rgba(0, 0, 0, 0.5);
+    --SmartThemeCheckboxBgColorR: 220;
+    --SmartThemeCheckboxBgColorG: 220;
+    --SmartThemeCheckboxBgColorB: 210;
+    --SmartThemeCheckboxTickColorValue: calc(((((var(--SmartThemeCheckboxBgColorR) * 299) + (var(--SmartThemeCheckboxBgColorG) * 587) + (var(--SmartThemeCheckboxBgColorB) * 114)) / 1000) - 128) * -1000);
+    --SmartThemeCheckboxTickColor: rgb(var(--SmartThemeCheckboxTickColorValue),
+            var(--SmartThemeCheckboxTickColorValue),
+            var(--SmartThemeCheckboxTickColorValue));
 
 
     --sheldWidth: 50vw;
@@ -74,8 +82,8 @@
     color-scheme: only light;
 
     /* Send form variables */
-    --bottomFormBlockPadding: calc(var(--mainFontSize) / 3);
-    --bottomFormIconSize: calc(var(--mainFontSize) * 2);
+    --bottomFormBlockPadding: calc(var(--mainFontSize) / 2.5);
+    --bottomFormIconSize: calc(var(--mainFontSize) * 1.9);
     --bottomFormBlockSize: calc(var(--bottomFormIconSize) + var(--bottomFormBlockPadding));
 
     /*Top Bar Scaling Variables*/
@@ -118,6 +126,7 @@ body {
     font-family: "Noto Sans", "Noto Color Emoji", sans-serif;
     font-size: var(--mainFontSize);
     color: var(--SmartThemeBodyColor);
+    overflow: hidden;
 }
 
 ::-webkit-scrollbar {
@@ -217,7 +226,7 @@ table.responsiveTable {
     color: var(--white50a);
 }
 
-.mes[is_system="true"] .mes_text br {
+.mes[is_system="true"][ch_name="SillyTavern System"] .mes_text br {
     display: none;
 }
 
@@ -244,9 +253,7 @@ table.responsiveTable {
 }
 
 .mes_text li tt {
-    min-width: 80px;
     display: inline-block;
-    text-align: right;
 }
 
 .mes_text br,
@@ -561,10 +568,9 @@ hr {
     background-color: var(--crimson70a) !important;
 }
 
-#send_but_sheld {
+#nonQRFormItems {
     padding: 0;
     border: 0;
-    height: var(--bottomFormBlockSize);
     position: relative;
     background-position: center;
     display: flex;
@@ -572,10 +578,28 @@ hr {
     column-gap: 5px;
     font-size: var(--bottomFormIconSize);
     overflow: hidden;
-    order: 1003;
+    order: 25;
+    width: 100%;
 }
 
-#send_but_sheld>div {
+#leftSendForm,
+#rightSendForm {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+#leftSendForm {
+    order: 1;
+    padding-left: 2px;
+
+}
+
+#rightSendForm {
+    order: 3;
+    padding-right: 2px;
+}
+
+#send_form>#nonQRFormItems>div>div:not(.mes_stop) {
     width: var(--bottomFormBlockSize);
     height: var(--bottomFormBlockSize);
     margin: 0;
@@ -587,25 +611,26 @@ hr {
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: all 300ms;
 }
 
-#options_button:hover,
-#send_but_sheld>div:hover {
+#send_form>#nonQRFormItems>div>div:hover {
     opacity: 1;
     filter: brightness(1.2);
 }
 
 #send_but {
-    order: 99999;
+    order: 2;
 }
 
 #mes_continue {
-    order: 99998;
+    order: 1;
 }
 
-#send_but_sheld .mes_stop {
+#send_form .mes_stop {
     display: none;
-    order: 99997;
+    order: 2;
+    padding-right: 2px;
 }
 
 #options_button {
@@ -624,7 +649,7 @@ hr {
     transition: 0.3s;
     display: flex;
     align-items: center;
-    order: 1001;
+    order: 2;
 }
 
 .font-family-reset {
@@ -642,6 +667,7 @@ hr {
     backdrop-filter: blur(var(--SmartThemeBlurStrength));
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
     flex-flow: column;
+    border-radius: 10px;
 }
 
 .options-content,
@@ -672,7 +698,7 @@ hr {
 }
 
 #extensionsMenuButton {
-    order: 100;
+    order: 4;
     padding: 1px;
 }
 
@@ -739,6 +765,10 @@ hr {
 .last_mes {
     margin-bottom: 0 !important;
     /*only affects bubblechat to make it sit nicely at the bottom*/
+}
+
+.last_mes .mes_text {
+    padding-right: 30px;
 }
 
 /* SWIPE RELATED STYLES*/
@@ -891,14 +921,25 @@ hr {
     box-shadow: 0 0 5px var(--black50a);
 }
 
+.bogus_folder_select .avatar,
 .character_select .avatar {
     flex: unset;
+}
+
+.bogus_folder_select .avatar {
+    justify-content: center;
+    background-color: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+    outline-style: solid;
+    outline-width: 1px;
+    outline-color: var(--SmartThemeBorderColor);
 }
 
 .mes_block {
     padding-top: 0;
     padding-left: 10px;
     width: 100%;
+    overflow-x: hidden;
 }
 
 .mes_text {
@@ -923,7 +964,7 @@ textarea {
     background-color: var(--black30a);
     outline: none;
     border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 7px;
+    border-radius: 5px;
     color: var(--SmartThemeBodyColor);
     font-size: var(--mainFontSize);
     font-family: "Noto Sans", "Noto Color Emoji", sans-serif;
@@ -955,12 +996,12 @@ select {
     background-color: rgba(255, 0, 0, 0);
     border: 0;
     box-shadow: none;
-    padding-top: 6px;
+    padding: 6px;
     font-family: "Noto Sans", "Noto Color Emoji", sans-serif;
     margin: 0;
     text-shadow: 0px 0px calc(var(--shadowWidth) * 1px) var(--SmartThemeShadowColor);
     flex: 1;
-    order: 1002;
+    order: 3;
 }
 
 .text_pole::placeholder {
@@ -1013,7 +1054,7 @@ select {
     background-color: var(--black30a);
     color: var(--SmartThemeBodyColor);
     border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 7px;
+    border-radius: 5px;
     font-family: "Noto Sans", "Noto Color Emoji", sans-serif;
     padding: 3px 5px;
     width: 100%;
@@ -1226,6 +1267,20 @@ input[type="file"] {
     width: calc(100% - 85px);
 }
 
+#rm_print_characters_block .empty_block {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex-wrap: wrap;
+    text-align: center;
+    height: 100%;
+    width: 100%;
+    opacity: 0.5;
+    justify-content: center;
+    margin: 0 auto;
+    align-items: center;
+}
+
 #rm_print_characters_block {
     overflow-y: auto;
     flex-grow: 1;
@@ -1334,7 +1389,7 @@ select {
     padding: 3px 2px;
     background-color: var(--black30a);
     border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 7px;
+    border-radius: 5px;
     margin-bottom: 5px;
     height: min-content;
 }
@@ -1372,7 +1427,8 @@ select option:not(:checked) {
 
 .menu_button.disabled {
     filter: brightness(75%) grayscale(1);
-    cursor: not-allowed;
+    opacity: 0.5;
+    pointer-events: none;
 }
 
 .fav_on {
@@ -1456,14 +1512,14 @@ select option:not(:checked) {
     margin: 0;
     height: fit-content;
     padding: 5px;
-    border-radius: 7px;
+    border-radius: 5px;
     aspect-ratio: 1 / 1;
 }
 
 #character_sort_order {
     margin: 0;
     flex: 1;
-    border-radius: 7px;
+    border-radius: 5px;
     height: auto;
 }
 
@@ -1492,6 +1548,7 @@ input[type=search]:focus::-webkit-search-cancel-button {
     pointer-events: all;
 }
 
+.bogus_folder_select,
 .character_select {
     display: flex;
     flex-direction: row;
@@ -1518,6 +1575,7 @@ input[type=search]:focus::-webkit-search-cancel-button {
     font-style: italic;
 }
 
+.bogus_folder_select .avatar,
 .character_select .avatar {
     align-self: center;
 }
@@ -1545,6 +1603,7 @@ input[type=search]:focus::-webkit-search-cancel-button {
     display: block;
 }
 
+.bogus_folder_select:hover,
 .character_select:hover {
     background-color: var(--white30a);
 }
@@ -1982,7 +2041,7 @@ grammarly-extension {
     color: var(--SmartThemeBodyColor);
     background-color: var(--black50a);
     border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 7px;
+    border-radius: 5px;
     padding: 3px 5px;
     width: min-content;
     cursor: pointer;
@@ -2120,7 +2179,7 @@ grammarly-extension {
 }
 
 .online_status_indicator {
-    border-radius: 7px;
+    border-radius: 100%;
     width: 14px;
     height: 14px;
     background-color: red;
@@ -2190,6 +2249,7 @@ input[type='checkbox']:not(#nav-toggle):not(#rm_button_panel_pin):not(#lm_button
     transform: translateY(-0.075em);
     flex-shrink: 0;
     place-content: center;
+    filter: brightness(1.2);
 }
 
 input[type='checkbox']:not(#nav-toggle):not(#rm_button_panel_pin):not(#lm_button_panel_pin):not(#WI_panel_pin):not(.del_checkbox):not(#ARA_button_panel_pin) {
@@ -2202,7 +2262,7 @@ input[type="checkbox"]:not(#nav-toggle):not(#rm_button_panel_pin):not(#lm_button
     height: 0.65em;
     transform: scale(0);
     transition: 120ms transform ease-in-out;
-    box-shadow: inset 1em 1em var(--SmartThemeBlurTintColor);
+    box-shadow: inset 1em 1em var(--SmartThemeCheckboxTickColor);
     transform-origin: bottom left;
     clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
 }
@@ -2449,14 +2509,6 @@ input[type="range"]::-webkit-slider-thumb {
 
 .extraMesButtons {
     display: none;
-}
-
-.last_mes .mes_buttons {
-    right: -30px;
-}
-
-.last_mes .mes_block {
-    margin-right: 30px;
 }
 
 .mes_buttons .mes_edit,
@@ -2833,6 +2885,7 @@ body .ui-slider-handle {
     margin-left: 0;
     opacity: 1 !important;
     transition: filter 200ms;
+    filter: brightness(1.2);
 }
 
 .ui-slider-handle.ui-state-default {
@@ -3476,14 +3529,6 @@ a {
     align-items: center;
 }
 
-.prompt_overridden,
-.jailbreak_overridden {
-    color: var(--SmartThemeQuoteColor);
-    font-weight: bold;
-    font-style: italic;
-    font-size: 0.8em;
-}
-
 .openai_restorable .right_menu_button img {
     height: 20px;
 }
@@ -3716,11 +3761,15 @@ a {
 
 #show_more_messages {
     text-align: center;
-    margin: 10px 0;
+    margin: 10px auto;
     font-weight: 500;
-    text-decoration: underline;
     order: -1;
     cursor: pointer;
+    padding: 0.5em 1em;
+    background-color: var(--SmartThemeBlurTintColor);
+    width: fit-content;
+    border-radius: 10px;
+    outline: 1px solid var(--SmartThemeBorderColor);
 }
 
 .draggable img {

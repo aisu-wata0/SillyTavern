@@ -376,7 +376,7 @@ function RA_checkOnlineStatus() {
         connection_made = false;
     } else {
         if (online_status !== undefined && online_status !== "no_connection") {
-            $("#send_textarea").attr("placeholder", `Type a message, or /? for command list`); //on connect, placeholder tells user to type message
+            $("#send_textarea").attr("placeholder", `Type a message, or /? for help`); //on connect, placeholder tells user to type message
             $('#send_form').removeClass("no-connection");
             $("#API-status-top").removeClass("fa-plug-circle-exclamation redOverlayGlow");
             $("#API-status-top").addClass("fa-plug");
@@ -960,6 +960,9 @@ export function initRossMods() {
         if (power_user.gestures === false) {
             return
         }
+        if ($(".mes_edit_buttons, .drawer-content, #character_popup, #dialogue_popup, #WorldInfo, #right-nav-panel, #left-nav-panel, #select_chat_popup, #floatingPrompt").is(":visible")) {
+            return
+        }
         var SwipeButR = $('.swipe_right:last');
         var SwipeTargetMesClassParent = $(e.target).closest('.last_mes');
         if (SwipeTargetMesClassParent !== null) {
@@ -970,6 +973,9 @@ export function initRossMods() {
     });
     document.addEventListener('swiped-right', function (e) {
         if (power_user.gestures === false) {
+            return
+        }
+        if ($(".mes_edit_buttons, .drawer-content, #character_popup, #dialogue_popup, #WorldInfo, #right-nav-panel, #left-nav-panel, #select_chat_popup, #floatingPrompt").is(":visible")) {
             return
         }
         var SwipeButL = $('.swipe_left:last');
