@@ -1938,10 +1938,11 @@ async function ARA_summary_regenerate(mock = false, signal = null) {
 }
 
 async function ARA_prompt(generate_data, chat_id, signal) {
-    ARA = await ARA_get()
-    if (!ARA) {
+    let r = await ARA_get()
+    if (!r) {
         ARA_notLoggedIn()
     }
+
     const body = {
         generate_data,
         ARA: {
