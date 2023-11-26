@@ -28,6 +28,7 @@ import {
     callPopup,
     deactivateSendButtons,
     activateSendButtons,
+    main_api,
 } from "../script.js";
 import { getMessageTimeStamp } from "./RossAscends-mods.js";
 import { findGroupMemberId, groups, is_group_generating, resetSelectedGroup, saveGroupChat, selected_group } from "./group-chats.js";
@@ -36,8 +37,9 @@ import { addEphemeralStoppingString, chat_styles, flushEphemeralStoppingStrings,
 import { autoSelectPersona } from "./personas.js";
 import { getContext } from "./extensions.js";
 import { hideChatMessage, unhideChatMessage } from "./chats.js";
-import { delay, isFalseBoolean, isTrueBoolean, stringToRange } from "./utils.js";
+import { delay, isFalseBoolean, isTrueBoolean, stringToRange, trimToEndSentence, trimToStartSentence } from "./utils.js";
 import { registerVariableCommands, resolveVariable } from "./variables.js";
+import { decodeTextTokens, getFriendlyTokenizerName, getTextTokens, getTokenCount } from "./tokenizers.js";
 export {
     executeSlashCommands,
     registerSlashCommand,
@@ -168,13 +170,17 @@ parser.addCommand('genraw', generateRawCallback, [], '<span class="monospace">(l
 parser.addCommand('addswipe', addSwipeCallback, ['swipeadd'], '<span class="monospace">(text)</span> – adds a swipe to the last chat message.', true, true);
 parser.addCommand('abort', abortCallback, [], ' – aborts the slash command batch execution', true, true);
 parser.addCommand('fuzzy', fuzzyCallback, [], 'list=["a","b","c"] (search value) – performs a fuzzy match of the provided search using the provided list of value and passes the closest match to the next command through the pipe.', true, true);
-parser.addCommand('pass', (_, arg) => arg, [], '<span class="monospace">(text)</span> – passes the text to the next command through the pipe.', true, true);
+parser.addCommand('pass', (_, arg) => arg, ['return'], '<span class="monospace">(text)</span> – passes the text to the next command through the pipe.', true, true);
 parser.addCommand('delay', delayCallback, ['wait', 'sleep'], '<span class="monospace">(milliseconds)</span> – delays the next command in the pipe by the specified number of milliseconds.', true, true);
 parser.addCommand('input', inputCallback, ['prompt'], '<span class="monospace">(prompt)</span> – shows a popup with the provided prompt and passes the user input to the next command through the pipe.', true, true);
 parser.addCommand('run', runCallback, ['call', 'exec'], '<span class="monospace">(QR label)</span> – runs a Quick Reply with the specified name from the current preset.', true, true);
 parser.addCommand('messages', getMessagesCallback, ['message'], '<span class="monospace">(names=off/on [message index or range])</span> – returns the specified message or range of messages as a string.', true, true);
 parser.addCommand('setinput', setInputCallback, [], '<span class="monospace">(text)</span> – sets the user input to the specified text and passes it to the next command through the pipe.', true, true);
 parser.addCommand('popup', popupCallback, [], '<span class="monospace">(text)</span> – shows a blocking popup with the specified text.', true, true);
+parser.addCommand('buttons', buttonsCallback, [], '<span class="monospace">labels=["a","b"] (text)</span> – shows a blocking popup with the specified text and buttons. Returns the clicked button label into the pipe or empty string if canceled.', true, true);
+parser.addCommand('trimtokens', trimTokensCallback, [], '<span class="monospace">limit=number (direction=start/end [text])</span> – trims the start or end of text to the specified number of tokens.', true, true);
+parser.addCommand('trimstart', trimStartCallback, [], '<span class="monospace">(text)</span> – trims the text to the start of the first full sentence.', true, true);
+parser.addCommand('trimend', trimEndCallback, [], '<span class="monospace">(text)</span> – trims the text to the end of the last full sentence.', true, true);
 registerVariableCommands();
 
 const NARRATOR_NAME_KEY = 'narrator_name';
@@ -186,10 +192,112 @@ function setInputCallback(_, value) {
     return value;
 }
 
+function trimStartCallback(_, value) {
+    if (!value) {
+        return '';
+    }
+
+    return trimToStartSentence(value);
+}
+
+function trimEndCallback(_, value) {
+    if (!value) {
+        return '';
+    }
+
+    return trimToEndSentence(value);
+}
+
+function trimTokensCallback(arg, value) {
+    if (!value) {
+        console.warn('WARN: No argument provided for /trimtokens command');
+        return '';
+    }
+
+    const limit = Number(resolveVariable(arg.limit));
+
+    if (isNaN(limit)) {
+        console.warn(`WARN: Invalid limit provided for /trimtokens command: ${limit}`);
+        return value;
+    }
+
+    if (limit <= 0) {
+        return '';
+    }
+
+    const direction = arg.direction || 'end';
+    const tokenCount = getTokenCount(value)
+
+    // Token count is less than the limit, do nothing
+    if (tokenCount <= limit) {
+        return value;
+    }
+
+    const { tokenizerName, tokenizerId } = getFriendlyTokenizerName(main_api);
+    console.debug('Requesting tokenization for /trimtokens command', tokenizerName);
+
+    try {
+        const textTokens = getTextTokens(tokenizerId, value);
+
+        if (!Array.isArray(textTokens) || !textTokens.length) {
+            console.warn('WARN: No tokens returned for /trimtokens command, falling back to estimation');
+            const percentage = limit / tokenCount;
+            const trimIndex = Math.floor(value.length * percentage);
+            const trimmedText = direction === 'start' ? value.substring(trimIndex) : value.substring(0, value.length - trimIndex);
+            return trimmedText;
+        }
+
+        const sliceTokens = direction === 'start' ? textTokens.slice(0, limit) : textTokens.slice(-limit);
+        const decodedText = decodeTextTokens(tokenizerId, sliceTokens);
+        return decodedText;
+    } catch (error) {
+        console.warn('WARN: Tokenization failed for /trimtokens command, returning original', error);
+        return value;
+    }
+}
+
+async function buttonsCallback(args, text) {
+    try {
+        const buttons = JSON.parse(resolveVariable(args?.labels));
+
+        if (!Array.isArray(buttons) || !buttons.length) {
+            console.warn('WARN: Invalid labels provided for /buttons command');
+            return '';
+        }
+
+        return new Promise(async (resolve) => {
+            const safeValue = DOMPurify.sanitize(text || '');
+
+            const buttonContainer = document.createElement('div');
+            buttonContainer.classList.add('flex-container', 'flexFlowColumn', 'wide100p', 'm-t-1');
+
+            for (const button of buttons) {
+                const buttonElement = document.createElement('div');
+                buttonElement.classList.add('menu_button', 'wide100p');
+                buttonElement.addEventListener('click', () => {
+                    resolve(button);
+                    $('#dialogue_popup_ok').trigger('click');
+                });
+                buttonElement.innerText = button;
+                buttonContainer.appendChild(buttonElement);
+            }
+
+            const popupContainer = document.createElement('div');
+            popupContainer.innerHTML = safeValue;
+            popupContainer.appendChild(buttonContainer);
+            callPopup(popupContainer, 'text', '', { okButton: 'Cancel' })
+                .then(() => resolve(''))
+                .catch(() => resolve(''));
+        })
+    } catch {
+        return '';
+    }
+}
+
 async function popupCallback(_, value) {
     const safeValue = DOMPurify.sanitize(value || '');
     await delay(1);
-    await callPopup(safeValue, 'text');
+    await callPopup(safeValue, 'text', '');
     await delay(1);
     return value;
 }
@@ -209,6 +317,10 @@ function getMessagesCallback(args, value) {
         const message = chat[messageId];
         if (!message) {
             console.warn(`WARN: No message found with ID ${messageId}`);
+            continue;
+        }
+
+        if (message.is_system) {
             continue;
         }
 
@@ -264,7 +376,8 @@ async function delayCallback(_, amount) {
 async function inputCallback(_, prompt) {
     // Do not remove this delay, otherwise the prompt will not show up
     await delay(1);
-    const result = await callPopup(prompt || '', 'input');
+    const safeValue = DOMPurify.sanitize(prompt || '');
+    const result = await callPopup(safeValue, 'input', '', { okButton: 'Ok' });
     await delay(1);
     return result || '';
 }
@@ -331,7 +444,7 @@ async function generateRawCallback(args, value) {
             deactivateSendButtons();
         }
 
-        setEphemeralStopStrings(args?.stop);
+        setEphemeralStopStrings(resolveVariable(args?.stop));
         const result = await generateRaw(value, '', isFalseBoolean(args?.instruct));
         return result;
     } finally {
@@ -357,7 +470,7 @@ async function generateCallback(args, value) {
             deactivateSendButtons();
         }
 
-        setEphemeralStopStrings(args?.stop);
+        setEphemeralStopStrings(resolveVariable(args?.stop));
         const result = await generateQuietPrompt(value, false, false, '');
         return result;
     } finally {
@@ -1205,13 +1318,15 @@ async function executeSlashCommands(text, unescape = false) {
         let unnamedArg = result.value || pipeResult;
 
         if (typeof result.args === 'object') {
-            for (const [key, value] of Object.entries(result.args)) {
+            for (let [key, value] of Object.entries(result.args)) {
                 if (typeof value === 'string') {
+                    value = substituteParams(value.trim());
+
                     if (/{{pipe}}/i.test(value)) {
-                        result.args[key] = value.replace(/{{pipe}}/i, pipeResult || '');
+                        value = value.replace(/{{pipe}}/i, pipeResult || '');
                     }
 
-                    result.args[key] = substituteParams(value.trim());
+                    result.args[key] = value;
                 }
             }
         }

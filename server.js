@@ -55,7 +55,7 @@ const characterCardParser = require('./src/character-card-parser.js');
 const contentManager = require('./src/content-manager');
 const statsHelpers = require('./statsHelpers.js');
 const { readSecret, migrateSecrets, SECRET_KEYS } = require('./src/secrets');
-const { delay, getVersion, deepMerge } = require('./src/util');
+const { delay, getVersion, deepMerge, getConfigValue, color } = require('./src/util');
 const { invalidateThumbnail, ensureThumbnailCache } = require('./src/thumbnails');
 const { getTokenizerModel, getTiktokenTokenizer, loadTokenizers, TEXT_COMPLETION_MODELS, getSentencepiceTokenizer, sentencepieceTokenizers } = require('./src/tokenizers');
 const { convertClaudePrompt } = require('./src/chat-completion');
@@ -76,8 +76,11 @@ const cliArguments = yargs(hideBin(process.argv))
         type: 'boolean',
         default: null,
         describe: 'Automatically launch SillyTavern in the browser.'
-    })
-    .option('disableCsrf', {
+    }).option('corsProxy', {
+        type: 'boolean',
+        default: false,
+        describe: 'Enables CORS proxy',
+    }).option('disableCsrf', {
         type: 'boolean',
         default: false,
         describe: 'Disables CSRF protection'
@@ -106,12 +109,10 @@ app.use(responseTime());
 
 // impoort from statsHelpers.js
 
-const config = require(path.join(process.cwd(), './config.conf'));
-
-const server_port = process.env.SILLY_TAVERN_PORT || config.port;
+const server_port = process.env.SILLY_TAVERN_PORT || getConfigValue('port', 8000);
 
 const whitelistPath = path.join(process.cwd(), "./whitelist.txt");
-let whitelist = config.whitelist;
+let whitelist = getConfigValue('whitelist', []);
 
 if (fs.existsSync(whitelistPath)) {
     try {
@@ -120,10 +121,10 @@ if (fs.existsSync(whitelistPath)) {
     } catch (e) { }
 }
 
-const whitelistMode = config.whitelistMode;
-const autorun = config.autorun && cliArguments.autorun !== false && !cliArguments.ssl;
-const enableExtensions = config.enableExtensions;
-const listen = config.listen;
+const whitelistMode = getConfigValue('whitelistMode', true);
+const autorun = getConfigValue('autorun', false) && cliArguments.autorun !== false && !cliArguments.ssl;
+const enableExtensions = getConfigValue('enableExtensions', true);
+const listen = getConfigValue('listen', false);
 
 const API_OPENAI = "https://api.openai.com/v1";
 const API_CLAUDE = "https://api.anthropic.com/v1";
@@ -134,22 +135,6 @@ let main_api = "kobold";
 
 let characters = {};
 let response_dw_bg;
-
-let color = {
-    byNum: (mess, fgNum) => {
-        mess = mess || '';
-        fgNum = fgNum === undefined ? 31 : fgNum;
-        return '\u001b[' + fgNum + 'm' + mess + '\u001b[39m';
-    },
-    black: (mess) => color.byNum(mess, 30),
-    red: (mess) => color.byNum(mess, 31),
-    green: (mess) => color.byNum(mess, 32),
-    yellow: (mess) => color.byNum(mess, 33),
-    blue: (mess) => color.byNum(mess, 34),
-    magenta: (mess) => color.byNum(mess, 35),
-    cyan: (mess) => color.byNum(mess, 36),
-    white: (mess) => color.byNum(mess, 37)
-};
 
 function getMancerHeaders() {
     const apiKey = readSecret(SECRET_KEYS.MANCER);
@@ -179,7 +164,8 @@ function getTabbyHeaders() {
 }
 
 function getOverrideHeaders(urlHost) {
-    const overrideHeaders = config.requestOverrides?.find((e) => e.hosts?.includes(urlHost))?.headers;
+    const requestOverrides = getConfigValue('requestOverrides', []);
+    const overrideHeaders = requestOverrides?.find((e) => e.hosts?.includes(urlHost))?.headers;
     if (overrideHeaders && urlHost) {
         return overrideHeaders;
     } else {
@@ -274,7 +260,7 @@ const CORS = cors({
 
 app.use(CORS);
 
-if (listen && config.basicAuthMode) app.use(basicAuthMiddleware);
+if (listen && getConfigValue('basicAuthMode', false)) app.use(basicAuthMiddleware);
 
 // IP Whitelist //
 let knownIPs = new Set();
@@ -313,12 +299,50 @@ app.use(function (req, res, next) {
 
     //clientIp = req.connection.remoteAddress.split(':').pop();
     if (whitelistMode === true && !whitelist.some(x => ipMatching.matches(clientIp, ipMatching.getMatch(x)))) {
-        console.log(color.red('Forbidden: Connection attempt from ' + clientIp + '. If you are attempting to connect, please add your IP address in whitelist or disable whitelist mode in config.conf in root of SillyTavern folder.\n'));
-        return res.status(403).send('<b>Forbidden</b>: Connection attempt from <b>' + clientIp + '</b>. If you are attempting to connect, please add your IP address in whitelist or disable whitelist mode in config.conf in root of SillyTavern folder.');
+        console.log(color.red('Forbidden: Connection attempt from ' + clientIp + '. If you are attempting to connect, please add your IP address in whitelist or disable whitelist mode in config.yaml in root of SillyTavern folder.\n'));
+        return res.status(403).send('<b>Forbidden</b>: Connection attempt from <b>' + clientIp + '</b>. If you are attempting to connect, please add your IP address in whitelist or disable whitelist mode in config.yaml in root of SillyTavern folder.');
     }
     next();
 });
 
+if (getConfigValue('enableCorsProxy', false) === true || cliArguments.corsProxy === true) {
+    console.log('Enabling CORS proxy');
+
+    app.use('/proxy/:url', async (req, res) => {
+        const url = req.params.url; // get the url from the request path
+
+        // Disallow circular requests
+        const serverUrl = req.protocol + '://' + req.get('host');
+        if (url.startsWith(serverUrl)) {
+            return res.status(400).send('Circular requests are not allowed');
+        }
+
+        try {
+            const headers = JSON.parse(JSON.stringify(req.headers));
+            delete headers['x-csrf-token'];
+            delete headers['host'];
+            delete headers['referer'];
+            delete headers['origin'];
+            delete headers['cookie'];
+            delete headers['sec-fetch-mode'];
+            delete headers['sec-fetch-site'];
+            delete headers['sec-fetch-dest'];
+
+            const bodyMethods = ['POST', 'PUT', 'PATCH'];
+
+            const response = await fetch(url, {
+                method: req.method,
+                headers: headers,
+                body: bodyMethods.includes(req.method) ? JSON.stringify(req.body) : undefined,
+            });
+
+            response.body.pipe(res); // pipe the response to the proxy response
+
+        } catch (error) {
+            res.status(500).send('Error occurred while trying to proxy to: ' + url + ' ' + error);
+        }
+    });
+}
 
 app.use(express.static(process.cwd() + "/public", {}));
 
@@ -3629,12 +3653,12 @@ const setupTasks = async function () {
     console.log(color.green('SillyTavern is listening on: ' + tavernUrl));
 
     if (listen) {
-        console.log('\n0.0.0.0 means SillyTavern is listening on all network interfaces (Wi-Fi, LAN, localhost). If you want to limit it only to internal localhost (127.0.0.1), change the setting in config.conf to "listen=false". Check "access.log" file in the SillyTavern directory if you want to inspect incoming connections.\n');
+        console.log('\n0.0.0.0 means SillyTavern is listening on all network interfaces (Wi-Fi, LAN, localhost). If you want to limit it only to internal localhost (127.0.0.1), change the setting in config.yaml to "listen: false". Check "access.log" file in the SillyTavern directory if you want to inspect incoming connections.\n');
     }
 }
 
-if (listen && !config.whitelistMode && !config.basicAuthMode) {
-    if (config.securityOverride) {
+if (listen && !getConfigValue('whitelistMode', true) && !getConfigValue('basicAuthMode', false)) {
+    if (getConfigValue('securityOverride', false)) {
         console.warn(color.red("Security has been overridden. If it's not a trusted network, change the settings."));
     }
     else {
@@ -3681,7 +3705,7 @@ function generateTimestamp() {
  */
 function backupChat(name, chat) {
     try {
-        const isBackupDisabled = config.disableChatBackup;
+        const isBackupDisabled = getConfigValue('disableChatBackup', false);
 
         if (isBackupDisabled) {
             return;
