@@ -576,6 +576,50 @@
                                             </div>
                                         </div>
                                         <div class="range-block m-t-1">
+                                            <div class="range-block-title openai_restorable" data-i18n="Scenario Format Template">
+                                                <span>Scenario format template</span>
+                                                <div id="scenario_format_restore" title="Restore default format" class="right_menu_button">
+                                                    <div class="fa-solid fa-clock-rotate-left"></div>
+                                                </div>
+                                            </div>
+                                            <div class="toggle-description justifyLeft" data-i18n="Use scenario to mark a place where the content is inserted.">
+                                                Use <tt>{{scenario}}</tt> to mark a place where the content is inserted.
+                                            </div>
+                                            <div class="wide100p">
+                                                <textarea id="scenario_format_textarea" class="text_pole textarea_compact autoSetHeight" rows="3" placeholder="&mdash;"></textarea>
+                                            </div>
+                                        </div>
+                                        <div class="range-block m-t-1">
+                                            <div class="range-block-title openai_restorable" data-i18n="Personality Format Template">
+                                                <span>Personality format template</span>
+                                                <div id="personality_format_restore" title="Restore default format" class="right_menu_button">
+                                                    <div class="fa-solid fa-clock-rotate-left"></div>
+                                                </div>
+                                            </div>
+                                            <div class="toggle-description justifyLeft" data-i18n="Use personality to mark a place where the content is inserted.">
+                                                Use <tt>{{personality}}</tt> to mark a place where the content is inserted.
+                                            </div>
+                                            <div class="wide100p">
+                                                <textarea id="personality_format_textarea" class="text_pole textarea_compact autoSetHeight" rows="3" placeholder="&mdash;"></textarea>
+                                            </div>
+                                        </div>
+                                        <div class="range-block m-t-1">
+                                            <div class="range-block-title openai_restorable" data-i18n="Group Nudge Prompt Template">
+                                                <span>Group Nudge prompt template</span>
+                                                <div id="group_nudge_prompt_restore" title="Restore default format" class="right_menu_button">
+                                                    <div class="fa-solid fa-clock-rotate-left"></div>
+                                                </div>
+                                            </div>
+                                            <div class="toggle-description justifyLeft">
+                                                <span data-i18n="Sent at the end of the group chat history to force reply from a specific character.">
+                                                    Sent at the end of the group chat history to force reply from a specific character.
+                                                </span>
+                                            </div>
+                                            <div class="wide100p">
+                                                <textarea id="group_nudge_prompt_textarea" class="text_pole textarea_compact autoSetHeight" rows="3" placeholder="&mdash;"></textarea>
+                                            </div>
+                                        </div>
+                                        <div class="range-block m-t-1">
                                             <div class="range-block-title openai_restorable" data-i18n="New Chat">
                                                 <span>New Chat</span>
                                                 <div id="newchat_prompt_restore" title="Restore new chat prompt" class="right_menu_button">
@@ -1150,8 +1194,8 @@
                                     </div>
                                     <div data-forAphro=False class="alignitemscenter flex-container flexFlowColumn flexBasis48p flexGrow flexShrink gap0">
                                         <small data-i18n="rep.pen range">Repetition Penalty Range</small>
-                                        <input class="neo-range-slider" type="range" id="rep_pen_range_textgenerationwebui" name="volume" min="0" max="4096" step="1">
-                                        <input class="neo-range-input" type="number" min="0" max="4096" step="1" data-for="rep_pen_range_textgenerationwebui" id="rep_pen_range_counter_textgenerationwebui">
+                                        <input class="neo-range-slider" type="range" id="rep_pen_range_textgenerationwebui" name="volume" min="-1" max="4096" step="1">
+                                        <input class="neo-range-input" type="number" min="-1" max="4096" step="1" data-for="rep_pen_range_textgenerationwebui" id="rep_pen_range_counter_textgenerationwebui">
                                     </div>
                                     <div data-forAphro=False data-newbie-hidden class="alignitemscenter flex-container flexFlowColumn flexBasis48p flexGrow flexShrink gap0">
                                         <small data-i18n="Encoder Rep. Pen.">Encoder Penalty</small>
@@ -2905,6 +2949,10 @@
                             <label data-newbie-hidden class="checkbox_label" for="world_import_dialog" title="Ask to import the World Info/Lorebook for every new character with embedded lorebook. If unchecked, a brief message will be shown instead.">
                                 <input id="world_import_dialog" type="checkbox" />
                                 <span data-i18n="Lorebook Import Dialog">Lorebook Import Dialog</span>
+                            </label>
+                            <label class="checkbox_label" for="restore_user_input" title="Restore unsaved user input on page refresh">
+                                <input id="restore_user_input" type="checkbox" />
+                                <span data-i18n="Restore User Input">Restore User Input</span>
                             </label>
                             <label data-newbie-hidden id="movingUIModeCheckBlock" for="movingUImode" class="checkbox_label">
                                 <input id="movingUImode" type="checkbox" />

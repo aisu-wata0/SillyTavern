@@ -151,7 +151,7 @@ import {
 } from "./scripts/utils.js";
 
 import { ModuleWorkerWrapper, doDailyExtensionUpdatesCheck, extension_settings, getContext, loadExtensionSettings, processExtensionHelpers, registerExtensionHelper, renderExtensionTemplate, runGenerationInterceptors, saveMetadataDebounced } from "./scripts/extensions.js";
-import { COMMENT_NAME_DEFAULT, executeSlashCommands, getSlashCommandsHelp, registerSlashCommand } from "./scripts/slash-commands.js";
+import { COMMENT_NAME_DEFAULT, executeSlashCommands, getSlashCommandsHelp, processChatSlashCommands, registerSlashCommand } from "./scripts/slash-commands.js";
 import {
     tag_map,
     tags,
@@ -188,7 +188,7 @@ import {
     formatInstructModeSystemPrompt,
     replaceInstructMacros,
 } from "./scripts/instruct-mode.js";
-import { applyLocale } from "./scripts/i18n.js";
+import { applyLocale, initLocales } from "./scripts/i18n.js";
 import { getFriendlyTokenizerName, getTokenCount, getTokenizerModel, initTokenizers, saveTokenCache } from "./scripts/tokenizers.js";
 import { createPersona, initPersonas, selectCurrentPersona, setPersonaDescription } from "./scripts/personas.js";
 import { getBackgrounds, initBackgrounds } from "./scripts/backgrounds.js";
@@ -324,6 +324,7 @@ export const eventSource = new EventEmitter();
 
 eventSource.on(event_types.MESSAGE_RECEIVED, processExtensionHelpers);
 eventSource.on(event_types.MESSAGE_SENT, processExtensionHelpers);
+eventSource.on(event_types.CHAT_CHANGED, processChatSlashCommands);
 
 const characterGroupOverlay = new BulkEditOverlay();
 const characterContextMenu = new CharacterContextMenu(characterGroupOverlay);
@@ -731,6 +732,7 @@ async function firstLoadInit() {
 
     getSystemMessages();
     sendSystemMessage(system_message_types.WELCOME);
+    initLocales();
     await readSecretState();
     await getClientVersion();
     await getSettings();
@@ -3146,6 +3148,7 @@ async function Generate(type, { automatic_trigger, force_name2, resolve, reject,
             wiAfter: worldInfoAfter,
             loreBefore: worldInfoBefore,
             loreAfter: worldInfoAfter,
+            mesExamples: mesExamplesArray.join(''),
         };
 
         const storyString = renderStoryString(storyStringParams);
@@ -3992,37 +3995,54 @@ export function replaceBiasMarkup(str) {
     return (str ?? '').replace(/\{\{[\s\S]*?\}\}/gm, '');
 }
 
-export async function sendMessageAsUser(textareaText, messageBias) {
-    textareaText = getRegexedString(textareaText, regex_placement.USER_INPUT);
+/**
+ * Inserts a user message into the chat history.
+ * @param {string} messageText Message text.
+ * @param {string} messageBias Message bias.
+ * @param {number} [insertAt] Optional index to insert the message at.
+ * @returns {Promise<void>} A promise that resolves when the message is inserted.
+ */
+export async function sendMessageAsUser(messageText, messageBias, insertAt = null) {
+    messageText = getRegexedString(messageText, regex_placement.USER_INPUT);
 
-    chat[chat.length] = {};
-    chat[chat.length - 1]['name'] = name1;
-    chat[chat.length - 1]['is_user'] = true;
-    chat[chat.length - 1]['send_date'] = getMessageTimeStamp();
-    chat[chat.length - 1]['mes'] = substituteParams(textareaText);
-    chat[chat.length - 1]['extra'] = {};
+    const message = {
+        name: name1,
+        is_user: true,
+        is_system: false,
+        send_date: getMessageTimeStamp(),
+        mes: substituteParams(messageText),
+        extra: {},
+    };
 
     if (power_user.message_token_count_enabled) {
-        chat[chat.length - 1]['extra']['token_count'] = getTokenCount(chat[chat.length - 1]['mes'], 0);
+        message.extra.token_count = getTokenCount(message.mes, 0);
     }
 
     // Lock user avatar to a persona.
     if (user_avatar in power_user.personas) {
-        chat[chat.length - 1]['force_avatar'] = getUserAvatar(user_avatar);
+        message.force_avatar = getUserAvatar(user_avatar);
     }
 
     if (messageBias) {
-        console.debug('checking bias');
-        chat[chat.length - 1]['extra']['bias'] = messageBias;
+        message.extra.bias = messageBias;
     }
-    await populateFileAttachment(chat[chat.length - 1]);
-    statMesProcess(chat[chat.length - 1], 'user', characters, this_chid, '');
-    // Wait for all handlers to finish before continuing with the prompt
-    const chat_id = (chat.length - 1);
-    await eventSource.emit(event_types.MESSAGE_SENT, chat_id);
-    addOneMessage(chat[chat_id]);
-    await eventSource.emit(event_types.USER_MESSAGE_RENDERED, chat_id);
-    console.debug('message sent as user');
+
+    await populateFileAttachment(message);
+    statMesProcess(message, 'user', characters, this_chid, '');
+
+    if (typeof insertAt === 'number' && insertAt >= 0 && insertAt <= chat.length) {
+        chat.splice(insertAt, 0, message);
+        await saveChatConditional();
+        await eventSource.emit(event_types.MESSAGE_SENT, insertAt);
+        await reloadCurrentChat();
+        await eventSource.emit(event_types.USER_MESSAGE_RENDERED, insertAt);
+    } else {
+        chat.push(message);
+        const chat_id = (chat.length - 1);
+        await eventSource.emit(event_types.MESSAGE_SENT, chat_id);
+        addOneMessage(message);
+        await eventSource.emit(event_types.USER_MESSAGE_RENDERED, chat_id);
+    }
 }
 
 function getMaxContextSize() {
@@ -7697,7 +7717,9 @@ jQuery(async function () {
 
     $("#send_but").on('click', function () {
         if (is_send_press == false) {
-            is_send_press = true;
+            // This prevents from running /trigger command with a send button
+            // But send on Enter doesn't set is_send_press (it is done by the Generate itself)
+            // is_send_press = true;
             Generate();
         }
     });
@@ -9372,6 +9394,7 @@ jQuery(async function () {
         <ul class="justifyLeft">
             <li>Chub characters (direct link or id)<br>Example: <tt>Anonymous/example-character</tt></li>
             <li>Chub lorebooks (direct link or id)<br>Example: <tt>lorebooks/bartleby/example-lorebook</tt></li>
+            <li>JanitorAI character (direct link or id)<br>Example: <tt>https://janitorai.com/characters/ddd1498a-a370-4136-b138-a8cd9461fdfe_character-aqua-the-useless-goddess</tt></li>
             <li>More coming soon...</li>
         <ul>`
         const input = await callPopup(html, 'input');

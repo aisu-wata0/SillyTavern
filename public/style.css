@@ -135,7 +135,7 @@ body {
 }
 
 .scrollY {
-    overflow-y: auto;
+    overflow-y: auto !important;
 }
 
 ::-webkit-scrollbar-thumb {
@@ -415,12 +415,12 @@ hr {
 
 #bg1 {
     background-image: url('backgrounds/tavern day.jpg');
-    z-index: -2;
+    z-index: -3;
 }
 
 #bg_custom {
     background-image: none;
-    z-index: -1;
+    z-index: -2;
 }
 
 /*TOPPER margin*/
@@ -548,7 +548,7 @@ hr {
 /* special case for desktop Safari to allow #sheld resizing */
 @media only screen and (min-width: 1024px) and (-webkit-min-device-pixel-ratio: 2) and (pointer: fine) {
     #form_sheld {
-        margin-bottom: 5px;
+        margin-bottom: 4px;
     }
 }
 
@@ -688,6 +688,7 @@ hr {
     display: flex;
     align-items: center;
     justify-content: center;
+    pointer-events: none;
 }
 
 .options-content hr {

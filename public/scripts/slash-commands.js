@@ -29,13 +29,16 @@ import {
     deactivateSendButtons,
     activateSendButtons,
     main_api,
+    is_send_press,
+    extension_prompt_types,
+    setExtensionPrompt,
 } from "../script.js";
 import { getMessageTimeStamp } from "./RossAscends-mods.js";
 import { findGroupMemberId, groups, is_group_generating, resetSelectedGroup, saveGroupChat, selected_group } from "./group-chats.js";
 import { getRegexedString, regex_placement } from "./extensions/regex/engine.js";
 import { addEphemeralStoppingString, chat_styles, flushEphemeralStoppingStrings, power_user } from "./power-user.js";
 import { autoSelectPersona } from "./personas.js";
-import { getContext } from "./extensions.js";
+import { getContext, saveMetadataDebounced } from "./extensions.js";
 import { hideChatMessage, unhideChatMessage } from "./chats.js";
 import { delay, isFalseBoolean, isTrueBoolean, stringToRange, trimToEndSentence, trimToStartSentence } from "./utils.js";
 import { registerVariableCommands, resolveVariable } from "./variables.js";
@@ -152,8 +155,8 @@ parser.addCommand('go', goToCharacterCallback, ['char'], '<span class="monospace
 parser.addCommand('sysgen', generateSystemMessage, [], '<span class="monospace">(prompt)</span> – generates a system message using a specified prompt', true, true);
 parser.addCommand('ask', askCharacter, [], '<span class="monospace">(prompt)</span> – asks a specified character card a prompt', true, true);
 parser.addCommand('delname', deleteMessagesByNameCallback, ['cancel'], '<span class="monospace">(name)</span> – deletes all messages attributed to a specified name', true, true);
-parser.addCommand('send', sendUserMessageCallback, ['add'], '<span class="monospace">(text)</span> – adds a user message to the chat log without triggering a generation', true, true);
-parser.addCommand('trigger', triggerGroupMessageCallback, [], '<span class="monospace">(member index or name)</span> – triggers a message generation for the specified group member', true, true);
+parser.addCommand('send', sendUserMessageCallback, [], '<span class="monospace">(text)</span> – adds a user message to the chat log without triggering a generation', true, true);
+parser.addCommand('trigger', triggerGenerationCallback, [], ' – triggers a message generation. If in group, can trigger a message for the specified group member index or name.', true, true);
 parser.addCommand('hide', hideMessageCallback, [], '<span class="monospace">(message index or range)</span> – hides a chat message from the prompt', true, true);
 parser.addCommand('unhide', unhideMessageCallback, [], '<span class="monospace">(message index or range)</span> – unhides a message from the prompt', true, true);
 parser.addCommand('disable', disableGroupMemberCallback, [], '<span class="monospace">(member index or name)</span> – disables a group member from being drafted for replies', true, true);
@@ -181,11 +184,114 @@ parser.addCommand('buttons', buttonsCallback, [], '<span class="monospace">label
 parser.addCommand('trimtokens', trimTokensCallback, [], '<span class="monospace">limit=number (direction=start/end [text])</span> – trims the start or end of text to the specified number of tokens.', true, true);
 parser.addCommand('trimstart', trimStartCallback, [], '<span class="monospace">(text)</span> – trims the text to the start of the first full sentence.', true, true);
 parser.addCommand('trimend', trimEndCallback, [], '<span class="monospace">(text)</span> – trims the text to the end of the last full sentence.', true, true);
+parser.addCommand('inject', injectCallback, [], '<span class="monospace">id=injectId (position=before/after/chat depth=number [text])</span> – injects a text into the LLM prompt for the current chat. Requires a unique injection ID. Positions: "before" main prompt, "after" main prompt, in-"chat" (default: after). Depth: injection depth for the prompt (default: 4).', true, true);
+parser.addCommand('listinjects', listInjectsCallback, [], ' – lists all script injections for the current chat.', true, true);
+parser.addCommand('flushinjects', flushInjectsCallback, [], ' – removes all script injections for the current chat.', true, true);
 registerVariableCommands();
 
 const NARRATOR_NAME_KEY = 'narrator_name';
 const NARRATOR_NAME_DEFAULT = 'System';
 export const COMMENT_NAME_DEFAULT = 'Note';
+const SCRIPT_PROMPT_KEY = 'script_inject_';
+
+function injectCallback(args, value) {
+    const positions = {
+        'before': extension_prompt_types.BEFORE_PROMPT,
+        'after': extension_prompt_types.IN_PROMPT,
+        'chat': extension_prompt_types.IN_CHAT,
+    };
+
+    const id = resolveVariable(args?.id);
+
+    if (!id) {
+        console.warn('WARN: No ID provided for /inject command');
+        toastr.warning('No ID provided for /inject command');
+        return '';
+    }
+
+    const defaultPosition = 'after';
+    const defaultDepth = 4;
+    const positionValue = args?.position ?? defaultPosition;
+    const position = positions[positionValue] ?? positions[defaultPosition];
+    const depthValue = Number(args?.depth) ?? defaultDepth;
+    const depth = isNaN(depthValue) ? defaultDepth : depthValue;
+    value = value || '';
+
+    const prefixedId = `${SCRIPT_PROMPT_KEY}${id}`;
+
+    if (!chat_metadata.script_injects) {
+        chat_metadata.script_injects = {};
+    }
+
+    chat_metadata.script_injects[id] = {
+        value,
+        position,
+        depth,
+    };
+
+    setExtensionPrompt(prefixedId, value, position, depth);
+    saveMetadataDebounced();
+    return '';
+}
+
+function listInjectsCallback() {
+    if (!chat_metadata.script_injects) {
+        toastr.info('No script injections for the current chat');
+        return '';
+    }
+
+    const injects = Object.entries(chat_metadata.script_injects)
+        .map(([id, inject]) => {
+            const position = Object.entries(extension_prompt_types);
+            const positionName = position.find(([_, value]) => value === inject.position)?.[0] ?? 'unknown';
+            return `* **${id}**: <code>${inject.value}</code> (${positionName}, depth: ${inject.depth})`;
+        })
+        .join('\n');
+
+    const converter = new showdown.Converter();
+    const messageText = `### Script injections:\n${injects}`;
+    const htmlMessage = DOMPurify.sanitize(converter.makeHtml(messageText));
+
+    sendSystemMessage(system_message_types.GENERIC, htmlMessage);
+}
+
+function flushInjectsCallback() {
+    if (!chat_metadata.script_injects) {
+        return '';
+    }
+
+    for (const [id, inject] of Object.entries(chat_metadata.script_injects)) {
+        const prefixedId = `${SCRIPT_PROMPT_KEY}${id}`;
+        setExtensionPrompt(prefixedId, '', inject.position, inject.depth);
+    }
+
+    chat_metadata.script_injects = {};
+    saveMetadataDebounced();
+    return '';
+}
+
+export function processChatSlashCommands() {
+    const context = getContext();
+
+    if (!(context.chatMetadata.script_injects)) {
+        return;
+    }
+
+    for (const id of Object.keys(context.extensionPrompts)) {
+        if (!id.startsWith(SCRIPT_PROMPT_KEY)) {
+            continue;
+        }
+
+        console.log('Removing script injection', id);
+        delete context.extensionPrompts[id];
+    }
+
+    for (const [id, inject] of Object.entries(context.chatMetadata.script_injects)) {
+        const prefixedId = `${SCRIPT_PROMPT_KEY}${id}`;
+        console.log('Adding script injection', id);
+        setExtensionPrompt(prefixedId, inject.value, inject.position, inject.depth);
+    }
+}
 
 function setInputCallback(_, value) {
     $('#send_textarea').val(value || '').trigger('input');
@@ -627,7 +733,7 @@ async function askCharacter(_, text) {
 
     setCharacterName(character.name);
 
-    sendMessageAsUser(mesText)
+    await sendMessageAsUser(mesText, '');
 
     const restoreCharacter = () => {
         setCharacterId(prevChId);
@@ -686,14 +792,14 @@ async function hideMessageCallback(_, arg) {
 async function unhideMessageCallback(_, arg) {
     if (!arg) {
         console.warn('WARN: No argument provided for /unhide command');
-        return;
+        return '';
     }
 
     const range = stringToRange(arg, 0, chat.length - 1);
 
     if (!range) {
         console.warn(`WARN: Invalid range provided for /unhide command: ${arg}`);
-        return;
+        return '';
     }
 
     for (let messageId = range.start; messageId <= range.end; messageId++) {
@@ -701,128 +807,136 @@ async function unhideMessageCallback(_, arg) {
 
         if (!messageBlock.length) {
             console.warn(`WARN: No message found with ID ${messageId}`);
-            return;
+            return '';
         }
 
         await unhideChatMessage(messageId, messageBlock);
     }
+
+    return '';
 }
 
 async function disableGroupMemberCallback(_, arg) {
     if (!selected_group) {
         toastr.warning("Cannot run /disable command outside of a group chat.");
-        return;
+        return '';
     }
 
     const chid = findGroupMemberId(arg);
 
     if (chid === undefined) {
         console.warn(`WARN: No group member found for argument ${arg}`);
-        return;
+        return '';
     }
 
     $(`.group_member[chid="${chid}"] [data-action="disable"]`).trigger('click');
+    return '';
 }
 
 async function enableGroupMemberCallback(_, arg) {
     if (!selected_group) {
         toastr.warning("Cannot run /enable command outside of a group chat.");
-        return;
+        return '';
     }
 
     const chid = findGroupMemberId(arg);
 
     if (chid === undefined) {
         console.warn(`WARN: No group member found for argument ${arg}`);
-        return;
+        return '';
     }
 
     $(`.group_member[chid="${chid}"] [data-action="enable"]`).trigger('click');
+    return '';
 }
 
 async function moveGroupMemberUpCallback(_, arg) {
     if (!selected_group) {
         toastr.warning("Cannot run /memberup command outside of a group chat.");
-        return;
+        return '';
     }
 
     const chid = findGroupMemberId(arg);
 
     if (chid === undefined) {
         console.warn(`WARN: No group member found for argument ${arg}`);
-        return;
+        return '';
     }
 
     $(`.group_member[chid="${chid}"] [data-action="up"]`).trigger('click');
+    return '';
 }
 
 async function moveGroupMemberDownCallback(_, arg) {
     if (!selected_group) {
         toastr.warning("Cannot run /memberdown command outside of a group chat.");
-        return;
+        return '';
     }
 
     const chid = findGroupMemberId(arg);
 
     if (chid === undefined) {
         console.warn(`WARN: No group member found for argument ${arg}`);
-        return;
+        return '';
     }
 
     $(`.group_member[chid="${chid}"] [data-action="down"]`).trigger('click');
+    return '';
 }
 
 async function peekCallback(_, arg) {
     if (!selected_group) {
         toastr.warning("Cannot run /peek command outside of a group chat.");
-        return;
+        return '';
     }
 
     if (is_group_generating) {
         toastr.warning("Cannot run /peek command while the group reply is generating.");
-        return;
+        return '';
     }
 
     const chid = findGroupMemberId(arg);
 
     if (chid === undefined) {
         console.warn(`WARN: No group member found for argument ${arg}`);
-        return;
+        return '';
     }
 
     $(`.group_member[chid="${chid}"] [data-action="view"]`).trigger('click');
+    return '';
 }
 
 async function removeGroupMemberCallback(_, arg) {
     if (!selected_group) {
         toastr.warning("Cannot run /memberremove command outside of a group chat.");
-        return;
+        return '';
     }
 
     if (is_group_generating) {
         toastr.warning("Cannot run /memberremove command while the group reply is generating.");
-        return;
+        return '';
     }
 
     const chid = findGroupMemberId(arg);
 
     if (chid === undefined) {
         console.warn(`WARN: No group member found for argument ${arg}`);
-        return;
+        return '';
     }
 
     $(`.group_member[chid="${chid}"] [data-action="remove"]`).trigger('click');
+    return '';
 }
 
 async function addGroupMemberCallback(_, arg) {
     if (!selected_group) {
         toastr.warning("Cannot run /memberadd command outside of a group chat.");
-        return;
+        return '';
     }
 
     if (!arg) {
         console.warn('WARN: No argument provided for /memberadd command');
-        return;
+        return '';
     }
 
     arg = arg.trim();
@@ -830,7 +944,7 @@ async function addGroupMemberCallback(_, arg) {
 
     if (chid === -1) {
         console.warn(`WARN: No character found for argument ${arg}`);
-        return;
+        return '';
     }
 
     const character = characters[chid];
@@ -838,14 +952,14 @@ async function addGroupMemberCallback(_, arg) {
 
     if (!group || !Array.isArray(group.members)) {
         console.warn(`WARN: No group found for ID ${selected_group}`);
-        return;
+        return '';
     }
 
     const avatar = character.avatar;
 
     if (group.members.includes(avatar)) {
         toastr.warning(`${character.name} is already a member of this group.`);
-        return;
+        return '';
     }
 
     group.members.push(avatar);
@@ -853,33 +967,33 @@ async function addGroupMemberCallback(_, arg) {
 
     // Trigger to reload group UI
     $('#rm_button_selected_ch').trigger('click');
+    return character.name;
 }
 
-async function triggerGroupMessageCallback(_, arg) {
-    if (!selected_group) {
-        toastr.warning("Cannot run /trigger command outside of a group chat.");
-        return;
-    }
-
-    if (is_group_generating) {
-        toastr.warning("Cannot run trigger command while the group reply is generating.");
-        return;
+async function triggerGenerationCallback(_, arg) {
+    if (is_send_press || is_group_generating) {
+        toastr.warning("Cannot run trigger command while the reply is being generated.");
+        return '';
     }
 
     // Prevent generate recursion
     $('#send_textarea').val('').trigger('input');
 
-    const chid = findGroupMemberId(arg);
+    let chid = undefined;
 
-    if (chid === undefined) {
-        console.warn(`WARN: No group member found for argument ${arg}`);
-        return;
+    if (selected_group && arg) {
+        chid = findGroupMemberId(arg);
+
+        if (chid === undefined) {
+            console.warn(`WARN: No group member found for argument ${arg}`);
+        }
     }
 
-    Generate('normal', { force_chid: chid });
+    setTimeout(() => Generate('normal', { force_chid: chid }), 100);
+    return '';
 }
 
-async function sendUserMessageCallback(_, text) {
+async function sendUserMessageCallback(args, text) {
     if (!text) {
         console.warn('WARN: No text provided for /send command');
         return;
@@ -887,7 +1001,9 @@ async function sendUserMessageCallback(_, text) {
 
     text = text.trim();
     const bias = extractMessageBias(text);
-    await sendMessageAsUser(text, bias);
+    const insertAt = Number(resolveVariable(args?.at));
+    await sendMessageAsUser(text, bias, insertAt);
+    return '';
 }
 
 async function deleteMessagesByNameCallback(_, name) {
@@ -922,6 +1038,7 @@ async function deleteMessagesByNameCallback(_, name) {
     await reloadCurrentChat();
 
     toastr.info(`Deleted ${messagesToDelete.length} messages from ${name}`);
+    return '';
 }
 
 function findCharacterIndex(name) {
@@ -941,7 +1058,7 @@ function findCharacterIndex(name) {
     return -1;
 }
 
-function goToCharacterCallback(_, name) {
+async function goToCharacterCallback(_, name) {
     if (!name) {
         console.warn('WARN: No character name provided for /go command');
         return;
@@ -951,18 +1068,19 @@ function goToCharacterCallback(_, name) {
     const characterIndex = findCharacterIndex(name);
 
     if (characterIndex !== -1) {
-        openChat(new String(characterIndex));
+        await openChat(new String(characterIndex));
+        return characters[characterIndex]?.name;
     } else {
         console.warn(`No matches found for name "${name}"`);
+        return '';
     }
 }
 
-function openChat(id) {
+async function openChat(id) {
     resetSelectedGroup();
     setCharacterId(id);
-    setTimeout(() => {
-        reloadCurrentChat();
-    }, 1);
+    await delay(1);
+    await reloadCurrentChat();
 }
 
 function continueChatCallback() {
@@ -1035,7 +1153,7 @@ async function setNarratorName(_, text) {
     await saveChatConditional();
 }
 
-export async function sendMessageAs(namedArgs, text) {
+export async function sendMessageAs(args, text) {
     if (!text) {
         return;
     }
@@ -1043,8 +1161,8 @@ export async function sendMessageAs(namedArgs, text) {
     let name;
     let mesText;
 
-    if (namedArgs.name) {
-        name = namedArgs.name.trim();
+    if (args.name) {
+        name = args.name.trim();
         mesText = text.trim();
 
         if (!name && !text) {
@@ -1095,14 +1213,24 @@ export async function sendMessageAs(namedArgs, text) {
         }
     };
 
-    chat.push(message);
-    await eventSource.emit(event_types.MESSAGE_SENT, (chat.length - 1));
-    addOneMessage(message);
-    await eventSource.emit(event_types.USER_MESSAGE_RENDERED, (chat.length - 1));
-    await saveChatConditional();
+    const insertAt = Number(resolveVariable(args.at));
+
+    if (!isNaN(insertAt) && insertAt >= 0 && insertAt <= chat.length) {
+        chat.splice(insertAt, 0, message);
+        await saveChatConditional();
+        await eventSource.emit(event_types.MESSAGE_RECEIVED, insertAt);
+        await reloadCurrentChat();
+        await eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, insertAt);
+    } else {
+        chat.push(message);
+        await eventSource.emit(event_types.MESSAGE_RECEIVED, (chat.length - 1));
+        addOneMessage(message);
+        await eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, (chat.length - 1));
+        await saveChatConditional();
+    }
 }
 
-export async function sendNarratorMessage(_, text) {
+export async function sendNarratorMessage(args, text) {
     if (!text) {
         return;
     }
@@ -1126,11 +1254,21 @@ export async function sendNarratorMessage(_, text) {
         },
     };
 
-    chat.push(message);
-    await eventSource.emit(event_types.MESSAGE_SENT, (chat.length - 1));
-    addOneMessage(message);
-    await eventSource.emit(event_types.USER_MESSAGE_RENDERED, (chat.length - 1));
-    await saveChatConditional();
+    const insertAt = Number(resolveVariable(args.at));
+
+    if (!isNaN(insertAt) && insertAt >= 0 && insertAt <= chat.length) {
+        chat.splice(insertAt, 0, message);
+        await saveChatConditional();
+        await eventSource.emit(event_types.MESSAGE_SENT, insertAt);
+        await reloadCurrentChat();
+        await eventSource.emit(event_types.USER_MESSAGE_RENDERED, insertAt);
+    } else {
+        chat.push(message);
+        await eventSource.emit(event_types.MESSAGE_SENT, (chat.length - 1));
+        addOneMessage(message);
+        await eventSource.emit(event_types.USER_MESSAGE_RENDERED, (chat.length - 1));
+        await saveChatConditional();
+    }
 }
 
 export async function promptQuietForLoudResponse(who, text) {
@@ -1172,7 +1310,7 @@ export async function promptQuietForLoudResponse(who, text) {
 
 }
 
-async function sendCommentMessage(_, text) {
+async function sendCommentMessage(args, text) {
     if (!text) {
         return;
     }
@@ -1190,11 +1328,21 @@ async function sendCommentMessage(_, text) {
         },
     };
 
-    chat.push(message);
-    await eventSource.emit(event_types.MESSAGE_SENT, (chat.length - 1));
-    addOneMessage(message);
-    await eventSource.emit(event_types.USER_MESSAGE_RENDERED, (chat.length - 1));
-    await saveChatConditional();
+    const insertAt = Number(resolveVariable(args.at));
+
+    if (!isNaN(insertAt) && insertAt >= 0 && insertAt <= chat.length) {
+        chat.splice(insertAt, 0, message);
+        await saveChatConditional();
+        await eventSource.emit(event_types.MESSAGE_SENT, insertAt);
+        await reloadCurrentChat();
+        await eventSource.emit(event_types.USER_MESSAGE_RENDERED, insertAt);
+    } else {
+        chat.push(message);
+        await eventSource.emit(event_types.MESSAGE_SENT, (chat.length - 1));
+        addOneMessage(message);
+        await eventSource.emit(event_types.USER_MESSAGE_RENDERED, (chat.length - 1));
+        await saveChatConditional();
+    }
 }
 
 /**

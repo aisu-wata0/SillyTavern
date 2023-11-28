@@ -227,6 +227,7 @@ let power_user = {
     servers: [],
     bogus_folders: false,
     aux_field: 'character_version',
+    restore_user_input: true,
 };
 
 let themes = [];
@@ -1384,6 +1385,7 @@ function loadPowerUserSettings(settings, data) {
     $('#chat_width_slider').val(power_user.chat_width);
     $("#token_padding").val(power_user.token_padding);
     $("#aux_field").val(power_user.aux_field);
+    $("#restore_user_input").prop("checked", power_user.restore_user_input);
 
     $("#chat_truncation").val(power_user.chat_truncation);
     $('#chat_truncation_counter').val(power_user.chat_truncation);
@@ -1988,13 +1990,13 @@ function doNewChat() {
     }, 1);
 }
 
-function doRandomChat() {
+async function doRandomChat() {
     resetSelectedGroup();
-    setCharacterId(Math.floor(Math.random() * characters.length).toString());
-    setTimeout(() => {
-        reloadCurrentChat();
-    }, 1);
-
+    const characterId = Math.floor(Math.random() * characters.length).toString();
+    setCharacterId(characterId);
+    await delay(1);
+    await reloadCurrentChat();
+    return characters[characterId]?.name;
 }
 
 /**
@@ -3064,6 +3066,11 @@ $(document).ready(() => {
         power_user.aux_field = String(value);
         saveSettingsDebounced();
         printCharacters(false);
+    });
+
+    $('#restore_user_input').on('input', function () {
+        power_user.restore_user_input = !!$(this).prop('checked');
+        saveSettingsDebounced();
     });
 
     $(document).on('click', '#debug_table [data-debug-function]', function () {
