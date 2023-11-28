@@ -2058,11 +2058,12 @@ async function ARA_summary_preemptive(game, signal = null) {
 
 async function ARA_getResult(lastReply, chat_id, generate_data_prev, signal = null) {
     console.log("Absolute RPG Adventure:", "getResult()")
-    ARA = await ARA_get()
-    if (!ARA) {
+    let r = await ARA_get()
+    if (!r) {
         ARA_notLoggedIn()
         return false
     }
+    
     if (!lastReply) {
         return false
     }
