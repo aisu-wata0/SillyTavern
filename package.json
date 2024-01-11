@@ -4,12 +4,12 @@
         "@agnai/web-tokenizers": "^0.1.3",
         "@dqbd/tiktoken": "^1.0.2",
         "bing-translate-api": "^2.9.1",
+        "body-parser": "^1.20.2",
         "command-exists": "^1.2.9",
         "compression": "^1",
         "cookie-parser": "^1.4.6",
         "cors": "^2.8.5",
         "csrf-csrf": "^2.2.3",
-        "device-detector-js": "^3.0.3",
         "express": "^4.18.2",
         "form-data": "^4.0.0",
         "google-translate-api-browser": "^3.0.1",
@@ -17,7 +17,6 @@
         "ip-matching": "^2.1.2",
         "ipaddr.js": "^2.0.1",
         "jimp": "^0.22.10",
-        "json5": "^2.2.3",
         "lodash": "^4.17.21",
         "mime-types": "^2.1.35",
         "multer": "^1.4.5-lts.1",
@@ -43,6 +42,9 @@
         },
         "vectra": {
             "openai": "^4.17.0"
+        },
+        "axios": {
+            "follow-redirects": "^1.15.4"
         }
     },
     "name": "sillytavern",
@@ -52,12 +54,14 @@
         "type": "git",
         "url": "https://github.com/SillyTavern/SillyTavern.git"
     },
-    "version": "1.10.10",
+    "version": "1.11.2",
     "scripts": {
         "start": "node server.js",
         "start-multi": "node server.js --disableCsrf",
         "pkg": "pkg --compress Gzip --no-bytecode --public .",
-        "postinstall": "node post-install.js"
+        "postinstall": "node post-install.js",
+        "lint": "eslint \"src/**/*.js\" \"public/**/*.js\" ./*.js",
+        "lint-fix": "eslint \"src/**/*.js\" \"public/**/*.js\" ./*.js --fix"
     },
     "bin": {
         "sillytavern": "./server.js"
@@ -82,6 +86,7 @@
         ]
     },
     "devDependencies": {
+        "eslint": "^8.55.0",
         "jquery": "^3.6.4",
         "pkg": "^5.8.1",
         "pkg-fetch": "^3.5.2"
