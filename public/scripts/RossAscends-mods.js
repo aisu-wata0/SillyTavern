@@ -46,14 +46,10 @@ var RightNavPanel = document.getElementById('right-nav-panel');
 var LeftNavPanel = document.getElementById('left-nav-panel');
 var WorldInfo = document.getElementById('WorldInfo');
 
-var SelectedCharacterTab = document.getElementById("rm_button_selected_ch");
+var ARAPin = document.getElementById('ARA_button_panel_pin');
+var ARAPanel = document.getElementById('ara-panel');
+var AraDrawerIcon = document.getElementById('AraDrawerIcon');
 
-var ARAPin = document.getElementById("ARA_button_panel_pin");
-var ARAPanel = document.getElementById("ara-panel")
-var AraDrawerIcon = document.getElementById("AraDrawerIcon")
-
-var AutoConnectCheckbox = document.getElementById("auto-connect-checkbox");
-var AutoLoadChatCheckbox = document.getElementById("auto-load-chat-checkbox");
 var SelectedCharacterTab = document.getElementById('rm_button_selected_ch');
 
 var connection_made = false;
@@ -441,9 +437,9 @@ function OpenNavPanels() {
         }
 
         //auto-open ARA if locked and previously open
-        if (LoadLocalBool("ARALockOn") == true && LoadLocalBool("ARANavOpened") == true) {
-            console.debug("RA -- clicking ARA nav to open");
-            $("#AraDrawerIcon").click();
+        if (LoadLocalBool('ARALockOn') == true && LoadLocalBool('ARANavOpened') == true) {
+            console.debug('RA -- clicking ARA nav to open');
+            $('#AraDrawerIcon').click();
         }
     }
 }
@@ -798,28 +794,28 @@ export function initRossMods() {
         }
     });
 
-    $(ARAPin).on("click", function () {
-        SaveLocal("ARALockOn", $(ARAPin).prop("checked"));
-        let ARAPin_icon0 = $(ARAPin).siblings("label")[0].children[0];
-        let ARAPin_icon1 = $(ARAPin).siblings("label")[0].children[1];
-        if ($(ARAPin).prop("checked") == true) {
+    $(ARAPin).on('click', function () {
+        SaveLocal('ARALockOn', $(ARAPin).prop('checked'));
+        let ARAPin_icon0 = $(ARAPin).siblings('label')[0].children[0];
+        let ARAPin_icon1 = $(ARAPin).siblings('label')[0].children[1];
+        if ($(ARAPin).prop('checked') == true) {
             console.debug('adding pin class to Left nav');
             $(ARAPanel).addClass('pinnedOpen');
 
-            $(ARAPin_icon0).css('display', 'none')
-            $(ARAPin_icon1).css('display', 'inline')
+            $(ARAPin_icon0).css('display', 'none');
+            $(ARAPin_icon1).css('display', 'inline');
         } else {
             console.debug('removing pin class from Left nav');
             $(ARAPanel).removeClass('pinnedOpen');
 
             if ($(ARAPanel).hasClass('openDrawer') && $('.openDrawer').length > 1) {
-                $(ARAPanel).slideToggle(200, "swing");
+                $(ARAPanel).slideToggle(200, 'swing');
                 $(AraDrawerIcon).toggleClass('openIcon closedIcon');
                 $(ARAPanel).toggleClass('openDrawer closedDrawer');
             }
 
-            $(ARAPin_icon0).css('display', 'inline')
-            $(ARAPin_icon1).css('display', 'none')
+            $(ARAPin_icon0).css('display', 'inline');
+            $(ARAPin_icon1).css('display', 'none');
         }
     });
 
@@ -857,12 +853,12 @@ export function initRossMods() {
     }
 
 
-    $(ARAPin).prop('checked', LoadLocalBool("ARALockOn"));
-    if (LoadLocalBool("ARALockOn") == true) {
+    $(ARAPin).prop('checked', LoadLocalBool('ARALockOn'));
+    if (LoadLocalBool('ARALockOn') == true) {
         console.debug('setting ARAPin class via local var');
         $(ARAPanel).addClass('pinnedOpen');
     }
-    if (!!$(ARAPin).prop('checked')) {
+    if ($(ARAPin).prop('checked')) {
         console.debug('setting ARAPin class via checkbox state');
         $(ARAPanel).addClass('pinnedOpen');
     }
@@ -889,8 +885,8 @@ export function initRossMods() {
     });
 
     //save state of ARA being open or closed
-    $("#AraDrawerIcon").on("click", function () {
-        if (!$("#AraDrawerIcon").hasClass('openIcon')) {
+    $('#AraDrawerIcon').on('click', function () {
+        if (!$('#AraDrawerIcon').hasClass('openIcon')) {
             SaveLocal('ARANavOpened', 'true');
         } else { SaveLocal('ARANavOpened', 'false'); }
     });

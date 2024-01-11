@@ -1556,7 +1556,7 @@ function loadPowerUserSettings(settings, data) {
     switchCompactInputArea();
     reloadMarkdownProcessor(power_user.render_formulas);
 
-    $("#absoluteRPGAdventure").prop("checked", power_user.absoluteRPGAdventure);
+    $('#absoluteRPGAdventure').prop('checked', power_user.absoluteRPGAdventure);
 
     loadInstructMode(data);
     loadContextSettings();
