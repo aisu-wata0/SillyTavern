@@ -2486,109 +2486,6 @@ async function sendAltScaleRequest(messages, logit_bias, signal, type) {
     return data.output;
 }
 
-// const haveSameCaptureGroupMatch = (match1, match2) => {
-//     if (match1.length !== match2.length) {
-//         console.error("Matches from regex on `haveSameCaptureGroupMatch` have different number of capturing groups")
-//         return false; // Ensure both match objects have the same number of capturing groups
-//     }
-
-//     for (let i = 1; i < match1.length; i++) {
-//         if ((match1[i] !== undefined && match2[i] === undefined) || (match1[i] === undefined && match2[i] !== undefined)) {
-//             return false; // One match has a capture group match while the other doesn't
-//         }
-
-//         if (match1[i] !== undefined && match2[i] !== undefined) {
-//             return i;
-//         }
-//     }
-
-//     return false;
-// };
-
-const findUnfinishedPairsAll = (text, patterns = [
-    {
-        // HTML comment pattern
-        start: /(<!--)/g,
-        end: /(-->)/g,
-    },
-    {
-        // Markdown link pattern
-        start: /(\]\(#')/g,
-        end: /('\))/g,
-    },
-    {
-        // XML/HTML tags
-        start: /<(?<text_id>[^/].+?)>/g,
-        end: /<\/(?<text_id>.+?)>/g,
-    },
-]) => {
-    let unmatchedStartIdxs = [];
-    let unmatchedEndIdxs = [];
-    for (let i = 0; i < patterns.length; i++) {
-        const r = findUnfinishedPairs(text, patterns[i].start, patterns[i].end);
-        unmatchedStartIdxs = unmatchedStartIdxs.concat(r[0]);
-        unmatchedEndIdxs = unmatchedEndIdxs.concat(r[1]);
-    }
-    return [unmatchedStartIdxs, unmatchedEndIdxs];
-};
-
-/** Get unfinished section formatting. Doesn't handle nesting!
- * Default arguments handle HTML comments and single-line md invisible text like this: [](#'invisible text')
- */
-const findUnfinishedPairs = (text, startPattern = /(<!--)/g, endPattern = /(-->)/g) => {
-    const startMatches = [];
-    const endMatches = [];
-
-    // Find all occurrences of <!-- and -->, and store their positions
-    let match;
-    while ((match = startPattern.exec(text)) !== null) {
-        startMatches.push(match);
-    }
-
-    while ((match = endPattern.exec(text)) !== null) {
-        endMatches.push(match);
-    }
-
-    // Pair start and end matches to detect invalid cases
-    let unmatchedStartIdxs = [];
-    let unmatchedEndIdxs = [];
-    while (startMatches.length > 0) {
-        const start = startMatches.shift();
-        const startIndex = start.index;
-
-        if (endMatches.length === 0) {
-            unmatchedStartIdxs.push(startIndex);
-            continue;
-        }
-
-        const end = endMatches.shift();
-        const endIndex = end.index;
-
-        let sameText = true;
-        if (start?.groups?.text_id && end?.groups?.text_id) {
-            sameText = start.groups.text_id == end.groups.text_id;
-        }
-        if (endIndex < startIndex || !sameText) {
-            if (!sameText) {
-                console.warn('Text on `findUnfinishedPairs` have possibly nested or weird formatting, check regexes too');
-            }
-            unmatchedEndIdxs.push(endIndex);
-            // reinsert startIndex at the start of startMatches so that it can (possibly) match with the next endIndex
-            // unmatchedStartIdxs.unshift(startIndex)
-            startMatches.unshift(startIndex);
-            continue;
-        }
-    }
-
-    // Check for any unmatched -->
-    while (endMatches.length > 0) {
-        const end = endMatches.shift();
-        const endIndex = end.index;
-        unmatchedEndIdxs.push(endIndex);
-    }
-    return [unmatchedStartIdxs, unmatchedEndIdxs];
-};
-
 async function sendOpenAIRequest(type, messages, signal, chat_id) {
     // Provide default abort signal
     if (!signal) {
@@ -2785,29 +2682,12 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
             let utf8Decoder = new TextDecoder();
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) break;
+                if (done) return;
                 const rawData = isSSEStream ? value.data : utf8Decoder.decode(value, { stream: true });
-                if (isSSEStream && rawData === '[DONE]') break;
+                if (isSSEStream && rawData === '[DONE]') return;
                 tryParseStreamingError(response, rawData);
                 text += getStreamingReply(JSON.parse(rawData));
-
-                const unfinishedPairs = findUnfinishedPairsAll(text);
-
-                if (unfinishedPairs[0].length == 0) {
-                    yield { text, swipes: [] };
-                } else {
-                    const lastUnfinishedStartIdx = unfinishedPairs[0][unfinishedPairs[0].length - 1];
-                    yield {
-                        text: text.slice(0, lastUnfinishedStartIdx) + '.'.repeat(1 + (text.length - lastUnfinishedStartIdx) / 40),
-                        swipes: [],
-                    };
-                }
-            }
-            if (power_user.absoluteRPGAdventure) {
-                const data = await ARA_getResult(text, chat_id, generate_data_prev, signal);
-                if (data && data.game && data.game.lastReply) {
-                    yield { text: data.game.lastReply, swipes: [] };
-                }
+                yield { text, swipes: [] };
             }
         };
     }
