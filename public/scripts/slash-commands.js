@@ -154,7 +154,7 @@ parser.addCommand('sysgen', generateSystemMessage, [], '<span class="monospace">
 parser.addCommand('ask', askCharacter, [], '<span class="monospace">(prompt)</span> – asks a specified character card a prompt', true, true);
 parser.addCommand('delname', deleteMessagesByNameCallback, ['cancel'], '<span class="monospace">(name)</span> – deletes all messages attributed to a specified name', true, true);
 parser.addCommand('send', sendUserMessageCallback, [], '<span class="monospace">(text)</span> – adds a user message to the chat log without triggering a generation', true, true);
-parser.addCommand('trigger', triggerGenerationCallback, [], ' – triggers a message generation. If in group, can trigger a message for the specified group member index or name.', true, true);
+parser.addCommand('trigger', triggerGenerationCallback, [], ' <span class="monospace">await=true/false</span> – triggers a message generation. If in group, can trigger a message for the specified group member index or name. If <code>await=true</code> named argument passed, the command will await for the triggered generation before continuing.', true, true);
 parser.addCommand('hide', hideMessageCallback, [], '<span class="monospace">(message index or range)</span> – hides a chat message from the prompt', true, true);
 parser.addCommand('unhide', unhideMessageCallback, [], '<span class="monospace">(message index or range)</span> – unhides a message from the prompt', true, true);
 parser.addCommand('disable', disableGroupMemberCallback, [], '<span class="monospace">(member index or name)</span> – disables a group member from being drafted for replies', true, true);
@@ -167,7 +167,7 @@ parser.addCommand('peek', peekCallback, [], '<span class="monospace">(message in
 parser.addCommand('delswipe', deleteSwipeCallback, ['swipedel'], '<span class="monospace">(optional 1-based id)</span> – deletes a swipe from the last chat message. If swipe id not provided - deletes the current swipe.', true, true);
 parser.addCommand('echo', echoCallback, [], '<span class="monospace">(title=string severity=info/warning/error/success [text])</span> – echoes the text to toast message. Useful for pipes debugging.', true, true);
 //parser.addCommand('#', (_, value) => '', [], ' – a comment, does nothing, e.g. <tt>/# the next three commands switch variables a and b</tt>', true, true);
-parser.addCommand('gen', generateCallback, [], '<span class="monospace">(lock=on/off [prompt])</span> – generates text using the provided prompt and passes it to the next command through the pipe, optionally locking user input while generating.', true, true);
+parser.addCommand('gen', generateCallback, [], '<span class="monospace">(lock=on/off name="System" [prompt])</span> – generates text using the provided prompt and passes it to the next command through the pipe, optionally locking user input while generating and allowing to configure the in-prompt name for instruct mode (default = "System").', true, true);
 parser.addCommand('genraw', generateRawCallback, [], '<span class="monospace">(lock=on/off [prompt])</span> – generates text using the provided prompt and passes it to the next command through the pipe, optionally locking user input while generating. Does not include chat history or character card. Use instruct=off to skip instruct formatting, e.g. <tt>/genraw instruct=off Why is the sky blue?</tt>. Use stop=... with a JSON-serialized array to add one-time custom stop strings, e.g. <tt>/genraw stop=["\\n"] Say hi</tt>', true, true);
 parser.addCommand('addswipe', addSwipeCallback, ['swipeadd'], '<span class="monospace">(text)</span> – adds a swipe to the last chat message.', true, true);
 parser.addCommand('abort', abortCallback, [], ' – aborts the slash command batch execution', true, true);
@@ -354,8 +354,8 @@ function trimTokensCallback(arg, value) {
         }
 
         const sliceTokens = direction === 'start' ? textTokens.slice(0, limit) : textTokens.slice(-limit);
-        const decodedText = decodeTextTokens(tokenizerId, sliceTokens);
-        return decodedText;
+        const { text } = decodeTextTokens(tokenizerId, sliceTokens);
+        return text;
     } catch (error) {
         console.warn('WARN: Tokenization failed for /trimtokens command, returning original', error);
         return value;
@@ -587,7 +587,8 @@ async function generateCallback(args, value) {
         }
 
         setEphemeralStopStrings(resolveVariable(args?.stop));
-        const result = await generateQuietPrompt(value, false, false, '');
+        const name = args?.name;
+        const result = await generateQuietPrompt(value, false, false, '', name);
         return result;
     } finally {
         if (lock) {
@@ -1028,8 +1029,9 @@ async function addGroupMemberCallback(_, arg) {
     return character.name;
 }
 
-async function triggerGenerationCallback(_, arg) {
-    setTimeout(async () => {
+async function triggerGenerationCallback(args, value) {
+    const shouldAwait = isTrueBoolean(args?.await);
+    const outerPromise = new Promise((outerResolve) => setTimeout(async () => {
         try {
             await waitUntilCondition(() => !is_send_press && !is_group_generating, 10000, 100);
         } catch {
@@ -1043,16 +1045,21 @@ async function triggerGenerationCallback(_, arg) {
 
         let chid = undefined;
 
-        if (selected_group && arg) {
-            chid = findGroupMemberId(arg);
+        if (selected_group && value) {
+            chid = findGroupMemberId(value);
 
             if (chid === undefined) {
-                console.warn(`WARN: No group member found for argument ${arg}`);
+                console.warn(`WARN: No group member found for argument ${value}`);
             }
         }
 
-        setTimeout(() => Generate('normal', { force_chid: chid }), 100);
-    }, 1);
+        outerResolve(new Promise(innerResolve => setTimeout(() => innerResolve(Generate('normal', { force_chid: chid })), 100)));
+    }, 1));
+
+    if (shouldAwait) {
+        const innerPromise = await outerPromise;
+        await innerPromise;
+    }
 
     return '';
 }
@@ -1552,7 +1559,7 @@ async function executeSlashCommands(text, unescape = false) {
                     value = substituteParams(value.trim());
 
                     if (/{{pipe}}/i.test(value)) {
-                        value = value.replace(/{{pipe}}/i, pipeResult || '');
+                        value = value.replace(/{{pipe}}/i, pipeResult ?? '');
                     }
 
                     result.args[key] = value;
@@ -1560,8 +1567,26 @@ async function executeSlashCommands(text, unescape = false) {
             }
         }
 
-        if (typeof unnamedArg === 'string' && /{{pipe}}/i.test(unnamedArg)) {
-            unnamedArg = unnamedArg.replace(/{{pipe}}/i, pipeResult || '');
+        if (typeof unnamedArg === 'string') {
+            if (/{{pipe}}/i.test(unnamedArg)) {
+                unnamedArg = unnamedArg.replace(/{{pipe}}/i, pipeResult ?? '');
+            }
+
+            unnamedArg = unnamedArg
+                ?.replace(/\\\|/g, '|')
+                ?.replace(/\\\{/g, '{')
+                ?.replace(/\\\}/g, '}')
+            ;
+        }
+
+        for (const [key, value] of Object.entries(result.args)) {
+            if (typeof value === 'string') {
+                result.args[key] = value
+                    .replace(/\\\|/g, '|')
+                    .replace(/\\\{/g, '{')
+                    .replace(/\\\}/g, '}')
+                ;
+            }
         }
 
         pipeResult = await result.command.callback(result.args, unnamedArg);

@@ -83,7 +83,7 @@ function highlightDefaultPreset() {
  * Select context template if not already selected.
  * @param {string} preset Preset name.
  */
-function selectContextPreset(preset) {
+export function selectContextPreset(preset) {
     // If context template is not already selected, select it
     if (preset !== power_user.context.preset) {
         $('#context_presets').val(preset).trigger('change');
@@ -331,7 +331,7 @@ export function formatInstructModeExamples(mesExamples, name1, name2) {
  * @returns {string} Formatted instruct mode last prompt line.
  */
 export function formatInstructModePrompt(name, isImpersonate, promptBias, name1, name2) {
-    const includeNames = power_user.instruct.names || (!!selected_group && power_user.instruct.names_force_groups);
+    const includeNames = name && (power_user.instruct.names || (!!selected_group && power_user.instruct.names_force_groups));
     const getOutputSequence = () => power_user.instruct.last_output_sequence || power_user.instruct.output_sequence;
     let sequence = isImpersonate ? power_user.instruct.input_sequence : getOutputSequence();
 
