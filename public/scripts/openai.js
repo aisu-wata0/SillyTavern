@@ -1836,16 +1836,19 @@ async function ARA_get() {
         accessToken,
         tokenType,
         expiresIn,
+        scope,
     ] = [
         fragment.get('access_token'),
         fragment.get('token_type'),
         fragment.get('expires_in'),
+        fragment.get('scope'),
     ];
 
     if (accessToken) {
         fragment.delete('access_token');
         fragment.delete('token_type');
         fragment.delete('expires_in');
+        fragment.delete('scope');
         window.location.hash = fragment.toString();
 
         const expiresAt = new Date((Date.now() + Number(expiresIn) * 1000)).toUTCString();
