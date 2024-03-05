@@ -598,6 +598,11 @@ function getGroupAvatar(group) {
         return groupAvatar;
     }
 
+    // catch edge case where group had one member and that member is deleted
+    if (avatarCount === 0) {
+        return $('<div class="missing-avatar fa-solid fa-user-slash"></div>');
+    }
+
     // default avatar
     const groupAvatar = $('#group_avatars_template .collage_1').clone();
     groupAvatar.find('.img_1').attr('src', group.avatar_url || system_avatar);
@@ -1622,7 +1627,7 @@ export async function deleteGroupChat(groupId, chatId) {
 
     if (response.ok) {
         if (group.chats.length) {
-            await openGroupChat(groupId, group.chats[0]);
+            await openGroupChat(groupId, group.chats[group.chats.length - 1]);
         } else {
             await createNewGroupChat(groupId);
         }

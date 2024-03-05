@@ -18,9 +18,11 @@ import {
     textgen_types,
     getTextGenServer,
     validateTextGenUrl,
+    parseTextgenLogprobs,
+    parseTabbyLogprobs,
 } from './scripts/textgen-settings.js';
 
-const { MANCER, TOGETHERAI, OOBA, APHRODITE, OLLAMA } = textgen_types;
+const { MANCER, TOGETHERAI, OOBA, APHRODITE, OLLAMA, INFERMATICAI, OPENROUTER } = textgen_types;
 
 import {
     world_info,
@@ -146,6 +148,7 @@ import {
     getBase64Async,
     humanFileSize,
     Stopwatch,
+    isValidUrl,
 } from './scripts/utils.js';
 
 import { ModuleWorkerWrapper, doDailyExtensionUpdatesCheck, extension_settings, getContext, loadExtensionSettings, renderExtensionTemplate, runGenerationInterceptors, saveMetadataDebounced } from './scripts/extensions.js';
@@ -170,6 +173,7 @@ import {
 } from './scripts/secrets.js';
 import { EventEmitter } from './lib/eventemitter.js';
 import { markdownExclusionExt } from './scripts/showdown-exclusion.js';
+import { markdownUnderscoreExt } from './scripts/showdown-underscore.js';
 import { NOTE_MODULE_NAME, initAuthorsNote, metadata_keys, setFloatingPrompt, shouldWIAddPrompt } from './scripts/authors-note.js';
 import { registerPromptManagerMigration } from './scripts/PromptManager.js';
 import { getRegexedString, regex_placement } from './scripts/extensions/regex/engine.js';
@@ -194,7 +198,7 @@ import { createPersona, initPersonas, selectCurrentPersona, setPersonaDescriptio
 import { getBackgrounds, initBackgrounds, loadBackgroundSettings, background_settings } from './scripts/backgrounds.js';
 import { hideLoader, showLoader } from './scripts/loader.js';
 import { BulkEditOverlay, CharacterContextMenu } from './scripts/BulkEditOverlay.js';
-import { loadMancerModels, loadOllamaModels, loadTogetherAIModels } from './scripts/textgen-models.js';
+import { loadMancerModels, loadOllamaModels, loadTogetherAIModels, loadInfermaticAIModels, loadOpenRouterModels, loadAphroditeModels } from './scripts/textgen-models.js';
 import { appendFileContent, hasPendingFileAttachment, populateFileAttachment, decodeStyleTags, encodeStyleTags } from './scripts/chats.js';
 import { initPresetManager } from './scripts/preset-manager.js';
 import { evaluateMacros } from './scripts/macros.js';
@@ -394,6 +398,8 @@ export const event_types = {
     GROUP_CHAT_DELETED: 'group_chat_deleted',
     GENERATE_BEFORE_COMBINE_PROMPTS: 'generate_before_combine_prompts',
     GROUP_MEMBER_DRAFTED: 'group_member_drafted',
+    WORLD_INFO_ACTIVATED: 'world_info_activated',
+    TEXT_COMPLETION_SETTINGS_READY: 'text_completion_settings_ready',
 };
 
 export const eventSource = new EventEmitter();
@@ -685,6 +691,8 @@ function reloadMarkdownProcessor(render_formulas = false) {
             literalMidWordUnderscores: true,
             parseImgDimensions: true,
             tables: true,
+            underline: true,
+            extensions: [markdownUnderscoreExt()],
         });
     }
 
@@ -1053,6 +1061,15 @@ async function getStatusTextgen() {
         } else if (textgen_settings.type === OLLAMA) {
             loadOllamaModels(data?.data);
             online_status = textgen_settings.ollama_model || 'Connected';
+        } else if (textgen_settings.type === INFERMATICAI) {
+            loadInfermaticAIModels(data?.data);
+            online_status = textgen_settings.infermaticai_model;
+        } else if (textgen_settings.type === OPENROUTER) {
+            loadOpenRouterModels(data?.data);
+            online_status = textgen_settings.openrouter_model;
+        } else if (textgen_settings.type === APHRODITE) {
+            loadAphroditeModels(data?.data);
+            online_status = textgen_settings.aphrodite_model;
         } else {
             online_status = data?.result;
         }
@@ -1194,7 +1211,7 @@ function getCharacterBlock(item, id) {
     template.toggleClass('is_fav', item.fav || item.fav == 'true');
     template.find('.ch_fav').val(item.fav);
 
-    const description = item.data?.creator_notes?.split('\n', 1)[0] || '';
+    const description = item.data?.creator_notes || '';
     if (description) {
         template.find('.ch_description').text(description);
     }
@@ -1361,6 +1378,22 @@ export async function getOneCharacter(avatarUrl) {
             toastr.error(`Character ${avatarUrl} not found in the list`, 'Error', { timeOut: 5000, preventDuplicates: true });
         }
     }
+}
+
+function getCharacterSource(chId = this_chid) {
+    const character = characters[chId];
+
+    if (!character) {
+        return '';
+    }
+
+    const chubId = characters[this_chid]?.data?.extensions?.chub?.full_path;
+
+    if (chubId) {
+        return `https://chub.ai/characters/${chubId}`;
+    }
+
+    return '';
 }
 
 async function getCharacters() {
@@ -1603,15 +1636,21 @@ function messageFormatting(mes, ch_name, isSystem, isUser, messageId) {
     }
 
     if (!isSystem) {
-        let regexPlacement;
-        if (isUser) {
-            regexPlacement = regex_placement.USER_INPUT;
-        } else if (ch_name !== name2) {
-            regexPlacement = regex_placement.SLASH_COMMAND;
-        } else {
-            regexPlacement = regex_placement.AI_OUTPUT;
+        function getRegexPlacement() {
+            try {
+                if (isUser) {
+                    return regex_placement.USER_INPUT;
+                } else if (chat[messageId]?.extra?.type === 'narrator') {
+                    return regex_placement.SLASH_COMMAND;
+                } else {
+                    return regex_placement.AI_OUTPUT;
+                }
+            } catch {
+                return regex_placement.AI_OUTPUT;
+            }
         }
 
+        const regexPlacement = getRegexPlacement();
         const usableMessages = chat.map((x, index) => ({ message: x, index: index })).filter(x => !x.message.is_system);
         const indexOf = usableMessages.findIndex(x => x.index === Number(messageId));
         const depth = messageId >= 0 && indexOf !== -1 ? (usableMessages.length - indexOf - 1) : undefined;
@@ -2163,6 +2202,22 @@ function substituteParams(content, _name1, _name2, _original, _group, _replaceCh
         };
     }
 
+    const getGroupValue = () => {
+        if (typeof _group === 'string') {
+            return _group;
+        }
+
+        if (selected_group) {
+            const members = groups.find(x => x.id === selected_group)?.members;
+            const names = Array.isArray(members)
+                ? members.map(m => characters.find(c => c.avatar === m)?.name).filter(Boolean).join(', ')
+                : '';
+            return names;
+        } else {
+            return _name2 ?? name2;
+        }
+    };
+
     if (_replaceCharacterCard) {
         const fields = getCharacterCardFields();
         environment.charPrompt = fields.system || '';
@@ -2175,10 +2230,9 @@ function substituteParams(content, _name1, _name2, _original, _group, _replaceCh
     }
 
     // Must be substituted last so that they're replaced inside {{description}}
-    // TODO: evaluate macros recursively so we don't need to rely on substitution order
     environment.user = _name1 ?? name1;
     environment.char = _name2 ?? name2;
-    environment.group = environment.charIfNotGroup = _group ?? name2;
+    environment.group = environment.charIfNotGroup = getGroupValue();
     environment.model = getGeneratingModel();
 
     return evaluateMacros(content, environment);
@@ -2249,12 +2303,21 @@ export async function generateQuietPrompt(quiet_prompt, quietToLoud, skipWIAN, q
     return generateFinished;
 }
 
+/**
+ * Executes slash commands and returns the new text and whether the generation was interrupted.
+ * @param {string} message Text to be sent
+ * @returns {Promise<boolean>} Whether the message sending was interrupted
+ */
 async function processCommands(message) {
+    if (!message || !message.trim().startsWith('/')) {
+        return false;
+    }
+
     const previousText = String($('#send_textarea').val());
     const result = await executeSlashCommands(message);
 
     if (!result || typeof result !== 'object') {
-        return null;
+        return false;
     }
 
     const currentText = String($('#send_textarea').val());
@@ -2444,12 +2507,12 @@ export function getCharacterCardFields() {
         return result;
     }
 
-    const scenarioText = chat_metadata['scenario'] || characters[this_chid].scenario;
-    result.description = baseChatReplace(characters[this_chid].description.trim(), name1, name2);
-    result.personality = baseChatReplace(characters[this_chid].personality.trim(), name1, name2);
+    const scenarioText = chat_metadata['scenario'] || characters[this_chid]?.scenario;
+    result.description = baseChatReplace(characters[this_chid].description?.trim(), name1, name2);
+    result.personality = baseChatReplace(characters[this_chid].personality?.trim(), name1, name2);
     result.scenario = baseChatReplace(scenarioText.trim(), name1, name2);
-    result.mesExamples = baseChatReplace(characters[this_chid].mes_example.trim(), name1, name2);
-    result.persona = baseChatReplace(power_user.persona_description.trim(), name1, name2);
+    result.mesExamples = baseChatReplace(characters[this_chid].mes_example?.trim(), name1, name2);
+    result.persona = baseChatReplace(power_user.persona_description?.trim(), name1, name2);
     result.system = power_user.prefer_character_prompt ? baseChatReplace(characters[this_chid].data?.system_prompt?.trim(), name1, name2) : '';
     result.jailbreak = power_user.prefer_character_jailbreak ? baseChatReplace(characters[this_chid].data?.post_history_instructions?.trim(), name1, name2) : '';
 
@@ -2635,8 +2698,8 @@ class StreamingProcessor {
         }
 
         const continueMsg = this.type === 'continue' ? this.messageAlreadyGenerated : undefined;
-        await saveChatConditional();
         saveLogprobsForActiveMessage(this.messageLogprobs.filter(Boolean), continueMsg);
+        await saveChatConditional();
         activateSendButtons();
         showSwipeButtons();
         setGenerationProgress(0);
@@ -2857,7 +2920,7 @@ async function Generate(type, { automatic_trigger, force_name2, quiet_prompt, qu
     let message_already_generated = isImpersonate ? `${name1}: ` : `${name2}: `;
 
     if (!(dryRun || type == 'regenerate' || type == 'swipe' || type == 'quiet')) {
-        const interruptedByCommand = await processCommands($('#send_textarea').val());
+        const interruptedByCommand = await processCommands(String($('#send_textarea').val()));
 
         if (interruptedByCommand) {
             //$("#send_textarea").val('').trigger('input');
@@ -3158,7 +3221,7 @@ async function Generate(type, { automatic_trigger, force_name2, quiet_prompt, qu
     setFloatingPrompt();
     // Add WI to prompt (and also inject WI to AN value via hijack)
 
-    let { worldInfoString, worldInfoBefore, worldInfoAfter, worldInfoDepth } = await getWorldInfoPrompt(chat2, this_max_context);
+    let { worldInfoString, worldInfoBefore, worldInfoAfter, worldInfoDepth } = await getWorldInfoPrompt(chat2, this_max_context, dryRun);
 
     if (skipWIAN !== true) {
         console.log('skipWIAN not active, adding WIAN');
@@ -4448,6 +4511,16 @@ function parseAndSaveLogprobs(data, continueFrom) {
             // `sendOpenAIRequest`. `data` for these APIs is just a string with
             // the text of the generated message, logprobs are not included.
             return;
+        case 'textgenerationwebui':
+            switch (textgen_settings.type) {
+                case textgen_types.LLAMACPP: {
+                    logprobs = data?.completion_probabilities?.map(x => parseTextgenLogprobs(x.content, [x])) || null;
+                } break;
+                case textgen_types.APHRODITE:
+                case textgen_types.TABBY: {
+                    logprobs = parseTabbyLogprobs(data) || null;
+                } break;
+            } break;
         default:
             return;
     }
@@ -4461,6 +4534,10 @@ function parseAndSaveLogprobs(data, continueFrom) {
  * @returns {string} Extracted message
  */
 function extractMessageFromData(data) {
+    if (typeof data === 'string') {
+        return data;
+    }
+
     switch (main_api) {
         case 'kobold':
             return data.results[0].text;
@@ -5899,10 +5976,10 @@ function updateMessage(div) {
     let regexPlacement;
     if (mes.is_user) {
         regexPlacement = regex_placement.USER_INPUT;
-    } else if (mes.name === name2) {
-        regexPlacement = regex_placement.AI_OUTPUT;
-    } else if (mes.name !== name2 || mes.extra?.type === 'narrator') {
+    } else if (mes.extra?.type === 'narrator') {
         regexPlacement = regex_placement.SLASH_COMMAND;
+    } else {
+        regexPlacement = regex_placement.AI_OUTPUT;
     }
 
     // Ignore character override if sent as system
@@ -5917,7 +5994,11 @@ function updateMessage(div) {
         text = text.trim();
     }
 
-    const bias = extractMessageBias(text);
+    const bias = substituteParams(extractMessageBias(text));
+    text = substituteParams(text);
+    if (bias) {
+        text = removeMacros(text);
+    }
     mes['mes'] = text;
     if (mes['swipe_id'] !== undefined) {
         mes['swipes'][mes['swipe_id']] = text;
@@ -5960,7 +6041,7 @@ function openMessageDelete(fromSlashCommand) {
 }
 
 function messageEditAuto(div) {
-    const { mesBlock, text, mes } = updateMessage(div);
+    const { mesBlock, text, mes, bias } = updateMessage(div);
 
     mesBlock.find('.mes_text').val('');
     mesBlock.find('.mes_text').val(messageFormatting(
@@ -5970,6 +6051,8 @@ function messageEditAuto(div) {
         mes.is_user,
         this_edit_mes_id,
     ));
+    mesBlock.find('.mes_bias').empty();
+    mesBlock.find('.mes_bias').append(messageFormatting(bias, '', false, false, -1));
     saveChatDebounced();
 }
 
@@ -6143,7 +6226,27 @@ export async function displayPastChats() {
             const fileName = chat['file_name'];
             const chatContent = rawChats[fileName];
 
-            return chatContent && Object.values(chatContent).some(message => message?.mes?.toLowerCase()?.includes(searchQuery.toLowerCase()));
+            // // Uncomment this to return to old behavior (classical full-substring search).
+            // return chatContent && Object.values(chatContent).some(message => message?.mes?.toLowerCase()?.includes(searchQuery.toLowerCase()));
+
+            // Fragment search a.k.a. swoop (as in `helm-swoop` in the Helm package of Emacs).
+            // Split a `query` {string} into its fragments {string[]}.
+            function makeQueryFragments(query) {
+                let fragments = query.trim().split(/\s+/).map(str => str.trim().toLowerCase()).filter(onlyUnique);
+                // fragments = fragments.filter( function(str) { return str.length >= 3; } );  // Helm does this, but perhaps better if we don't.
+                return fragments;
+            }
+            // Check whether `text` {string} includes all of the `fragments` {string[]}.
+            function matchFragments(fragments, text) {
+                if (!text) {
+                    return false;
+                }
+                return fragments.every(item => text.includes(item));
+            }
+            const fragments = makeQueryFragments(searchQuery);
+            // At least one chat message must match *all* the fragments.
+            // Currently, this doesn't match if the fragment matches are distributed across several chat messages.
+            return chatContent && Object.values(chatContent).some(message => matchFragments(fragments, message?.mes?.toLowerCase()));
         });
 
         console.debug(filteredData);
@@ -6192,6 +6295,14 @@ export async function displayPastChats() {
         const searchQuery = $(this).val();
         debouncedDisplay(searchQuery);
     });
+
+    // UX convenience: Focus the search field when the Manage Chat Files view opens.
+    setTimeout(function () {
+        const textSearchElement = $('#select_chat_search');
+        textSearchElement.click();
+        textSearchElement.focus();
+        textSearchElement.select();  // select content (if any) for easy erasing
+    }, 200);
 }
 
 function selectRightMenuWithAnimation(selectedMenuId) {
@@ -6354,7 +6465,7 @@ export function select_selected_character(chid) {
     $('#description_textarea').val(characters[chid].description);
     $('#character_world').val(characters[chid].data?.extensions?.world || '');
     $('#creator_notes_textarea').val(characters[chid].data?.creator_notes || characters[chid].creatorcomment);
-    $('#creator_notes_spoiler').text(characters[chid].data?.creator_notes || characters[chid].creatorcomment);
+    $('#creator_notes_spoiler').html(DOMPurify.sanitize(converter.makeHtml(characters[chid].data?.creator_notes || characters[chid].creatorcomment), { MESSAGE_SANITIZE: true }));
     $('#character_version_textarea').val(characters[chid].data?.character_version || '');
     $('#system_prompt_textarea').val(characters[chid].data?.system_prompt || '');
     $('#post_history_instructions_textarea').val(characters[chid].data?.post_history_instructions || '');
@@ -6424,7 +6535,7 @@ function select_rm_create() {
     $('#description_textarea').val(create_save.description);
     $('#character_world').val(create_save.world);
     $('#creator_notes_textarea').val(create_save.creator_notes);
-    $('#creator_notes_spoiler').text(create_save.creator_notes);
+    $('#creator_notes_spoiler').html(DOMPurify.sanitize(converter.makeHtml(create_save.creator_notes), { MESSAGE_SANITIZE: true }));
     $('#post_history_instructions_textarea').val(create_save.post_history_instructions);
     $('#system_prompt_textarea').val(create_save.system_prompt);
     $('#tags_textarea').val(create_save.tags);
@@ -7654,6 +7765,16 @@ const CONNECT_API_MAP = {
         button: '#api_button_openai',
         source: chat_completion_sources.CUSTOM,
     },
+    'infermaticai': {
+        selected: 'textgenerationwebui',
+        button: '#api_button_textgenerationwebui',
+        type: textgen_types.INFERMATICAI,
+    },
+    'openrouter-text': {
+        selected: 'textgenerationwebui',
+        button: '#api_button_textgenerationwebui',
+        type: textgen_types.OPENROUTER,
+    },
 };
 
 async function selectContextCallback(_, name) {
@@ -7743,7 +7864,13 @@ async function connectAPISlash(_, text) {
     }
 }
 
-export async function processDroppedFiles(files) {
+/**
+ * Imports supported files dropped into the app window.
+ * @param {File[]} files Array of files to process
+ * @param {boolean?} preserveFileNames Whether to preserve original file names
+ * @returns {Promise<void>}
+ */
+export async function processDroppedFiles(files, preserveFileNames = false) {
     const allowedMimeTypes = [
         'application/json',
         'image/png',
@@ -7755,14 +7882,20 @@ export async function processDroppedFiles(files) {
 
     for (const file of files) {
         if (allowedMimeTypes.includes(file.type)) {
-            await importCharacter(file);
+            await importCharacter(file, preserveFileNames);
         } else {
             toastr.warning('Unsupported file type: ' + file.name);
         }
     }
 }
 
-async function importCharacter(file) {
+/**
+ * Imports a character from a file.
+ * @param {File} file File to import
+ * @param {boolean?} preserveFileName Whether to preserve original file name
+ * @returns {Promise<void>}
+ */
+async function importCharacter(file, preserveFileName = false) {
     const ext = file.name.match(/\.(\w+)$/);
     if (!ext || !(['json', 'png', 'yaml', 'yml'].includes(ext[1].toLowerCase()))) {
         return;
@@ -7773,6 +7906,7 @@ async function importCharacter(file) {
     const formData = new FormData();
     formData.append('avatar', file);
     formData.append('file_type', format);
+    formData.append('preserve_file_name', String(preserveFileName));
 
     const data = await jQuery.ajax({
         type: 'POST',
@@ -7830,9 +7964,9 @@ async function importFromURL(items, files) {
     }
 }
 
-async function doImpersonate() {
+async function doImpersonate(_, prompt) {
     $('#send_textarea').val('');
-    $('#option_impersonate').trigger('click', { fromSlashCommand: true });
+    $('#option_impersonate').trigger('click', { fromSlashCommand: true, additionalPrompt: prompt });
 }
 
 async function doDeleteChat() {
@@ -7999,7 +8133,7 @@ jQuery(async function () {
 
     registerSlashCommand('dupe', DupeChar, [], '– duplicates the currently selected character', true, true);
     registerSlashCommand('api', connectAPISlash, [], `<span class="monospace">(${Object.keys(CONNECT_API_MAP).join(', ')})</span> – connect to an API`, true, true);
-    registerSlashCommand('impersonate', doImpersonate, ['imp'], '– calls an impersonation response', true, true);
+    registerSlashCommand('impersonate', doImpersonate, ['imp'], '<span class="monospace">[prompt]</span> – calls an impersonation response, with an optional additional prompt', true, true);
     registerSlashCommand('delchat', doDeleteChat, [], '– deletes the current chat', true, true);
     registerSlashCommand('getchatname', doGetChatName, [], '– returns the name of the current chat file into the pipe', false, true);
     registerSlashCommand('closechat', doCloseChat, [], '– closes the current chat', true, true);
@@ -8298,8 +8432,13 @@ jQuery(async function () {
             await clearChat();
             chat.length = 0;
 
+            chat_file_for_del = getCurrentChatDetails().sessionName
+            const isDelChatCheckbox = document.getElementById('del_chat_checkbox').checked
+
             if (selected_group) {
+                //Fix it; When you're creating a new group chat (but not when initially converting from the existing regular chat), the first greeting message doesn't automatically get translated.
                 await createNewGroupChat(selected_group);
+                if (isDelChatCheckbox) await deleteGroupChat(selected_group, chat_file_for_del);
             }
             else {
                 //RossAscends: added character name to new chat filenames and replaced Date.now() with humanizedDateTime;
@@ -8308,6 +8447,7 @@ jQuery(async function () {
                 $('#selected_chat_pole').val(characters[this_chid].chat);
                 await getChat();
                 await createOrEditCharacter();
+                if (isDelChatCheckbox) await delChat(chat_file_for_del + '.jsonl');
             }
         }
 
@@ -8450,7 +8590,7 @@ jQuery(async function () {
                 throw new Error('Unsuccessful request.');
             }
 
-            const data = response.json();
+            const data = await response.json();
 
             if (data.error) {
                 throw new Error('Server returned an error.');
@@ -8462,6 +8602,7 @@ jQuery(async function () {
             else {
                 if (characters[this_chid].chat == old_filename) {
                     characters[this_chid].chat = newName;
+                    $('#selected_chat_pole').val(characters[this_chid].chat);
                     await createOrEditCharacter();
                 }
             }
@@ -8572,6 +8713,16 @@ jQuery(async function () {
             await writeSecret(SECRET_KEYS.OOBA, oobaKey);
         }
 
+        const infermaticAIKey = String($('#api_key_infermaticai').val()).trim();
+        if (infermaticAIKey.length) {
+            await writeSecret(SECRET_KEYS.INFERMATICAI, infermaticAIKey);
+        }
+
+        const openRouterKey = String($('#api_key_openrouter-tg').val()).trim();
+        if (openRouterKey.length) {
+            await writeSecret(SECRET_KEYS.OPENROUTER, openRouterKey);
+        }
+
         validateTextGenUrl();
         startStatusLoading();
         main_api = 'textgenerationwebui';
@@ -8647,6 +8798,13 @@ jQuery(async function () {
         const fromSlashCommand = customData?.fromSlashCommand || false;
         var id = $(this).attr('id');
 
+        // Check whether a custom prompt was provided via custom data (for example through a slash command)
+        const additionalPrompt = customData?.additionalPrompt?.trim() || undefined;
+        const buildOrFillAdditionalArgs = (args = {}) => ({
+            ...args,
+            ...(additionalPrompt !== undefined && { quiet_prompt: additionalPrompt, quietToLoud: true }),
+        });
+
         if (id == 'option_select_chat') {
             if ((selected_group && !is_group_generating) || (this_chid !== undefined && !is_send_press) || fromSlashCommand) {
                 await displayPastChats();
@@ -8667,8 +8825,14 @@ jQuery(async function () {
 
         else if (id == 'option_start_new_chat') {
             if ((selected_group || this_chid !== undefined) && !is_send_press) {
-                popup_type = 'new_chat';
-                callPopup('<h3>Start new chat?</h3>');
+                callPopup(`
+                    <h3>Start new chat?</h3><br>
+                    <label for="del_chat_checkbox" class="checkbox_label justifyCenter"
+                    title="If necessary, you can later restore this chat file from the /backups folder">
+                        <input type="checkbox" id="del_chat_checkbox" />
+                        <span>Also delete the current chat file</span>
+                    </label><br>
+                `, 'new_chat', '');
             }
         }
 
@@ -8682,7 +8846,7 @@ jQuery(async function () {
                 }
                 else {
                     is_send_press = true;
-                    Generate('regenerate');
+                    Generate('regenerate', buildOrFillAdditionalArgs());
                 }
             }
         }
@@ -8690,14 +8854,14 @@ jQuery(async function () {
         else if (id == 'option_impersonate') {
             if (is_send_press == false || fromSlashCommand) {
                 is_send_press = true;
-                Generate('impersonate');
+                Generate('impersonate', buildOrFillAdditionalArgs());
             }
         }
 
         else if (id == 'option_continue') {
             if (is_send_press == false || fromSlashCommand) {
                 is_send_press = true;
-                Generate('continue');
+                Generate('continue', buildOrFillAdditionalArgs());
             }
         }
 
@@ -9665,6 +9829,40 @@ jQuery(async function () {
                 await importEmbeddedWorldInfo();
                 saveCharacterDebounced();
                 break;
+            case 'character_source': {
+                const source = getCharacterSource(this_chid);
+                if (source && isValidUrl(source)) {
+                    const url = new URL(source);
+                    const confirm = await callPopup(`Open ${url.hostname} in a new tab?`, 'confirm');
+                    if (confirm) {
+                        window.open(source, '_blank');
+                    }
+                } else {
+                    toastr.info('This character doesn\'t seem to have a source.');
+                }
+            } break;
+            case 'replace_update': {
+                const confirm = await callPopup('<p><b>Choose a new character card to replace this character with.</b></p><p>All chats, assets and group memberships will be preserved, but local changes to the character data will be lost.</p><p>Proceed?</p>', 'confirm', '');
+                if (confirm) {
+                    async function uploadReplacementCard(e) {
+                        const file = e.target.files[0];
+
+                        if (!file) {
+                            return;
+                        }
+
+                        try {
+                            const cloneFile = new File([file], characters[this_chid].avatar, { type: file.type });
+                            const chatFile = characters[this_chid]['chat'];
+                            await processDroppedFiles([cloneFile], true);
+                            await openCharacterChat(chatFile);
+                        } catch {
+                            toastr.error('Failed to replace the character card.', 'Something went wrong');
+                        }
+                    }
+                    $('#character_replace_file').off('change').on('change', uploadReplacementCard).trigger('click');
+                }
+            } break;
             /*case 'delete_button':
                 popup_type = "del_ch";
                 callPopup(`
@@ -9831,9 +10029,10 @@ jQuery(async function () {
         const html = `<h3>Enter the URL of the content to import</h3>
         Supported sources:<br>
         <ul class="justifyLeft">
-            <li>Chub characters (direct link or id)<br>Example: <tt>Anonymous/example-character</tt></li>
-            <li>Chub lorebooks (direct link or id)<br>Example: <tt>lorebooks/bartleby/example-lorebook</tt></li>
-            <li>JanitorAI character (direct link or id)<br>Example: <tt>https://janitorai.com/characters/ddd1498a-a370-4136-b138-a8cd9461fdfe_character-aqua-the-useless-goddess</tt></li>
+            <li>Chub Character (Direct Link or ID)<br>Example: <tt>Anonymous/example-character</tt></li>
+            <li>Chub Lorebook (Direct Link or ID)<br>Example: <tt>lorebooks/bartleby/example-lorebook</tt></li>
+            <li>JanitorAI Character (Direct Link or UUID)<br>Example: <tt>ddd1498a-a370-4136-b138-a8cd9461fdfe_character-aqua-the-useless-goddess</tt></li>
+            <li>Pygmalion.chat Character (Direct Link or UUID)<br>Example: <tt>a7ca95a1-0c88-4e23-91b3-149db1e78ab9</tt></li>
             <li>More coming soon...</li>
         <ul>`;
         const input = await callPopup(html, 'input', '', { okButton: 'Import', rows: 4 });
@@ -9844,13 +10043,23 @@ jQuery(async function () {
         }
 
         const url = input.trim();
-        console.debug('Custom content import started', url);
+        var request;
 
-        const request = await fetch('/api/content/import', {
-            method: 'POST',
-            headers: getRequestHeaders(),
-            body: JSON.stringify({ url }),
-        });
+        if (isValidUrl(url)) {
+            console.debug('Custom content import started for URL: ', url);
+            request = await fetch('/api/content/importURL', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ url }),
+            });
+        } else {
+            console.debug('Custom content import started for Char UUID: ', url);
+            request = await fetch('/api/content/importUUID', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ url }),
+            });
+        }
 
         if (!request.ok) {
             toastr.info(request.statusText, 'Custom content import failed');
