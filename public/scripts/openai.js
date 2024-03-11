@@ -2616,6 +2616,8 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
         'stop': getCustomStoppingStrings(openai_max_stop_strings),
         'chat_completion_source': oai_settings.chat_completion_source,
         'n': canMultiSwipe ? oai_settings.n : undefined,
+        'user_name': name1,
+        'char_name': name2,
     };
 
     // Empty array will produce a validation error

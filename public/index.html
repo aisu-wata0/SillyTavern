@@ -1271,7 +1271,7 @@
                                         <input class="neo-range-slider" type="range" id="no_repeat_ngram_size_textgenerationwebui" name="volume" min="0" max="20" step="1">
                                         <input class="neo-range-input" type="number" min="0" max="20" step="1" data-for="no_repeat_ngram_size_textgenerationwebui" id="no_repeat_ngram_size_counter_textgenerationwebui">
                                     </div>
-                                    <div data-newbie-hidden data-tg-type="ooba" class="alignitemscenter flex-container flexFlowColumn flexBasis48p flexGrow flexShrink gap0">
+                                    <div data-newbie-hidden data-tg-type="ooba, dreamgen" class="alignitemscenter flex-container flexFlowColumn flexBasis48p flexGrow flexShrink gap0">
                                         <small data-i18n="Min Length">Min Length</small>
                                         <input class="neo-range-slider" type="range" id="min_length_textgenerationwebui" name="volume" min="0" max="2000" step="1" />
                                         <input class="neo-range-input" type="number" min="0" max="2000" step="1" data-for="min_length_textgenerationwebui" id="min_length_counter_textgenerationwebui">
@@ -1784,7 +1784,7 @@
                                             account for faster queue times</a>
                                     </li>
                                     <li>
-                                        <a target="_blank" href="https://github.com/db0/AI-Horde-Worker#readme" data-i18n="Learn how to contribute your idle GPU cycles to the Horde">Learn
+                                        <a target="_blank" href="https://github.com/Haidra-Org/horde-worker-reGen?tab=readme-ov-file#ai-horde-worker-regen" data-i18n="Learn how to contribute your idle GPU cycles to the Horde">Learn
                                             how to contribute your idle GPU cycles to the Horde</a>
                                     </li>
                                 </ul>
@@ -1897,15 +1897,16 @@
                                 <h4 data-i18n="API Type">API Type</h4>
                                 <select id="textgen_type">
                                     <option value="ooba" data-i18n="Default (oobabooga)">Default (oobabooga)</option>
-                                    <option value="mancer">Mancer</option>
                                     <option value="aphrodite">Aphrodite</option>
-                                    <option value="tabby">TabbyAPI</option>
+                                    <option value="dreamgen">DreamGen</option>
+                                    <option value="infermaticai">InfermaticAI</option>
                                     <option value="koboldcpp">KoboldCpp</option>
                                     <option value="llamacpp">llama.cpp</option>
-                                    <option value="openrouter">OpenRouter</option>
+                                    <option value="mancer">Mancer</option>
                                     <option value="ollama">Ollama</option>
+                                    <option value="openrouter">OpenRouter</option>
+                                    <option value="tabby">TabbyAPI</option>
                                     <option value="togetherai">TogetherAI</option>
-                                    <option value="infermaticai">InfermaticAI</option>
                                 </select>
                             </div>
                             <div data-tg-type="togetherai" class="flex-container flexFlowColumn">
@@ -1962,6 +1963,29 @@
                                 <div>
                                     <h4 data-i18n="InfermaticAI Model">InfermaticAI Model</h4>
                                     <select id="model_infermaticai_select">
+                                        <option>
+                                            -- Connect to the API --
+                                        </option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div data-tg-type="dreamgen" class="flex-container flexFlowColumn">
+                                <h4 data-i18n="DreamGen API key">
+                                    DreamGen API key
+                                    <a href="https://dreamgen.com/account/api-keys" class="notes-link" target="_blank">
+                                        <span class="fa-solid fa-circle-question note-link-span"></span>
+                                    </a>
+                                </h4>
+                                <div class="flex-container">
+                                    <input id="api_key_dreamgen" name="api_key_dreamgen" class="text_pole flex1" maxlength="500" value="" type="text" autocomplete="off">
+                                    <div title="Clear your API key" data-i18n="[title]Clear your API key" class="menu_button fa-solid fa-circle-xmark clear-api-key" data-key="api_key_dreamgen"></div>
+                                </div>
+                                <div data-for="api_key_dreamgen" class="neutral_warning">
+                                    For privacy reasons, your API key will be hidden after you reload the page.
+                                </div>
+                                <div>
+                                    <h4 data-i18n="DreamGen Model">DreamGen Model</h4>
+                                    <select id="model_dreamgen_select">
                                         <option>
                                             -- Connect to the API --
                                         </option>
@@ -4104,7 +4128,7 @@
                                                 </select>
                                             </label>
                                         </div>
-                                        <div id="tags_div" class="marginBot5">
+                                        <div id="tags_div">
                                             <div class="tag_controls">
                                                 <input id="tagInput" class="text_pole tag_input wide100p margin0" data-i18n="[placeholder]Search / Create Tags" placeholder="Search / Create tags" maxlength="50" />
                                                 <div class="tags_view menu_button fa-solid fa-tags" title="View all tags" data-i18n="[title]View all tags"></div>
@@ -4116,13 +4140,12 @@
                             </div>
                         </div>
                         <hr>
-                        <div id="spoiler_free_desc" class="flex-container flexFlowColumn flex1">
-                            <div id="creators_notes_div" class="marginBot5 title_restorable">
+                        <div id="spoiler_free_desc" class="flex-container flexFlowColumn flex1 flexNoGap">
+                            <div id="creators_notes_div" class="title_restorable">
                                 <span data-i18n="Creator's Notes">Creator's Notes</span>
-                                <div id="spoiler_free_desc_button" class="menu_button fa-solid fa-eye" title="Show / Hide Description and First Message" data-i18n="[title]Show / Hide Description and First Message"></div>
-                                </a>
+                                <div id="spoiler_free_desc_button" class="margin0 menu_button fa-solid fa-eye" title="Show / Hide Description and First Message" data-i18n="[title]Show / Hide Description and First Message"></div>
                             </div>
-                            <div id="creator_notes_spoiler" class="flex1" data-i18n="[placeholder]Creator's Notes" paceholder="Creator's Notes" class="marginBot5" name="creator_notes_spoiler"></div>
+                            <div id="creator_notes_spoiler" class="flex1"></div>
                             <!-- A button to show / hide description_div and description_textarea and first_message_div and firstmessage_textarea-->
                         </div>
                         <div id="descriptionWrapper" class="flex-container flexFlowColumn flex1">
@@ -4134,7 +4157,7 @@
                                     <span class="fa-solid fa-circle-question note-link-span"></span>
                                 </a>
                             </div>
-                            <textarea id="description_textarea" data-i18n="[placeholder]Describe your character's physical and mental traits here." placeholder="Describe your character's physical and mental traits here." class="marginBot5" name="description" placeholder=""></textarea>
+                            <textarea id="description_textarea" data-i18n="[placeholder]Describe your character's physical and mental traits here." placeholder="Describe your character's physical and mental traits here." name="description" placeholder=""></textarea>
                             <div class="extension_token_counter">
                                 Tokens: <span data-token-counter="description_textarea" data-token-permanent="true">counting...</span>
                             </div>
@@ -4154,7 +4177,7 @@
                                     </span>
                                 </div>
                             </div>
-                            <textarea id="firstmessage_textarea" data-i18n="[placeholder]This will be the first message from the character that starts every chat." placeholder="This will be the first message from the character that starts every chat." class="marginBot5" name="first_mes" placeholder=""></textarea>
+                            <textarea id="firstmessage_textarea" data-i18n="[placeholder]This will be the first message from the character that starts every chat." placeholder="This will be the first message from the character that starts every chat." name="first_mes" placeholder=""></textarea>
                             <div class="extension_token_counter">
                                 Tokens: <span data-token-counter="firstmessage_textarea">counting...</span>
                             </div>
@@ -4670,7 +4693,7 @@
                                         <textarea class="text_pole autoSetHeight" name="comment" maxlength="5000" data-i18n="[placeholder]Entry Title/Memo" placeholder="Entry Title/Memo"></textarea>
                                     </div>
                                     <!-- <span class="world_entry_form_position_value"></span> -->
-                                    <select data-i18n="[title]WI Entry Status:🔵 Constant🟢 Normal❌ Disabled" title="WI Entry Status:&#13;🔵 Constant&#13;🟢 Normal&#13;❌ Disabled" name="entryStateSelector" class="widthNatural margin0">
+                                    <select data-i18n="[title]WI Entry Status:🔵 Constant🟢 Normal❌ Disabled" title="WI Entry Status:&#13;🔵 Constant&#13;🟢 Normal&#13;❌ Disabled" name="entryStateSelector" class="text_pole widthNatural margin0">
                                         <option title="WI Entry Status:&#13;🔵 Constant&#13;🟢 Normal&#13;❌ Disabled" value="constant" data-i18n="[title]WI Entry Status:🔵 Constant🟢 Normal❌ Disabled">🔵</option>
                                         <option title="WI Entry Status:&#13;🔵 Constant&#13;🟢 Normal&#13;❌ Disabled" value="normal" data-i18n="[title]WI Entry Status:🔵 Constant🟢 Normal❌ Disabled">🟢</option>
                                         <option title="WI Entry Status:&#13;🔵 Constant&#13;🟢 Normal&#13;❌ Disabled" value="disabled" data-i18n="[title]WI Entry Status:🔵 Constant🟢 Normal❌ Disabled">❌</option>
@@ -4679,7 +4702,7 @@
                                 <div class="WIEnteryHeaderControls flex-container">
                                     <div name="PositionBlock" class="world_entry_form_control world_entry_form_radios wi-enter-footer-text">
                                         <label for="position" class="WIEntryHeaderTitleMobile" data-i18n="Position:">Position:</label>
-                                        <select name="position" class="widthNatural margin0" data-i18n="[title]T_Position" title="↑Char: Before Character Definitions&#13;↓Char: After Character Definitions&#13;↑AN: Before Author's Note&#13;↓AN: After Author's Note&#13;@D: at Depth&#13;">
+                                        <select name="position" class="text_pole widthNatural margin0" data-i18n="[title]T_Position" title="↑Char: Before Character Definitions&#13;↓Char: After Character Definitions&#13;↑AN: Before Author's Note&#13;↓AN: After Author's Note&#13;@D: at Depth&#13;">
                                             <option value="0" data-i18n="[title]T_Position" title="↑Char: Before Character Definitions&#13;↓Char: After Character Definitions&#13;↑AN: Before Author's Note&#13;↓AN: After Author's Note&#13;@D: at Depth&#13;"><span data-i18n="Before Char Defs">↑Char</span></option>
                                             <option value="1" data-i18n="[title]T_Position" title="↑Char: Before Character Definitions&#13;↓Char: After Character Definitions&#13;↑AN: Before Author's Note&#13;↓AN: After Author's Note&#13;@D: at Depth&#13;"><span data-i18n="After Char Defs">↓Char</span></option>
                                             <option value="2" data-i18n="[title]T_Position" title="↑Char: Before Character Definitions&#13;↓Char: After Character Definitions&#13;↑AN: Before Author's Note&#13;↓AN: After Author's Note&#13;@D: at Depth&#13;"><span data-i18n="Before AN">↑AN</span></option>
@@ -5653,12 +5676,14 @@
         toastr.options.positionClass = "toast-top-center"; // Where to position the toast container
     </script>
     <script>
-        const documentHeight = () => {
-            const doc = document.documentElement
-            doc.style.setProperty('--doc-height', `${window.innerHeight}px`)
-        }
-        window.addEventListener('resize', documentHeight)
-        documentHeight()
+        window.addEventListener('load', (event) => {
+            const documentHeight = () => {
+                const doc = document.documentElement;
+                doc.style.setProperty('--doc-height', `${window.innerHeight}px`);
+            }
+            window.addEventListener('resize', documentHeight);
+            documentHeight();
+        });
     </script>
 </body>
 
