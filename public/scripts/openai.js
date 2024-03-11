@@ -2737,9 +2737,9 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
             const swipes = [];
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) return;
+                if (done) break;
                 const rawData = value.data;
-                if (rawData === '[DONE]') return;
+                if (rawData === '[DONE]') break;
                 tryParseStreamingError(response, rawData);
                 const parsed = JSON.parse(rawData);
 
@@ -2752,6 +2752,13 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
 
                 yield { text, swipes: swipes, logprobs: parseChatCompletionLogprobs(parsed) };
             }
+            if (power_user.absoluteRPGAdventure) {
+                const data = await ARA_getResult(text, chat_id, generate_data_prev, signal);
+                if (data && data.game && data.game.lastReply) {
+                    yield { text: data.game.lastReply, swipes: swipes };
+                }
+            }
+            return;
         };
     }
     else {
