@@ -151,7 +151,7 @@ import {
     isValidUrl,
 } from './scripts/utils.js';
 
-import { ModuleWorkerWrapper, doDailyExtensionUpdatesCheck, extension_settings, getContext, loadExtensionSettings, renderExtensionTemplate, runGenerationInterceptors, saveMetadataDebounced } from './scripts/extensions.js';
+import { ModuleWorkerWrapper, doDailyExtensionUpdatesCheck, extension_settings, getContext, loadExtensionSettings, renderExtensionTemplate, runGenerationInterceptors, saveMetadataDebounced, writeExtensionField } from './scripts/extensions.js';
 import { COMMENT_NAME_DEFAULT, executeSlashCommands, getSlashCommandsHelp, processChatSlashCommands, registerSlashCommand } from './scripts/slash-commands.js';
 import {
     tag_map,
@@ -3181,6 +3181,13 @@ async function Generate(type, { automatic_trigger, force_name2, quiet_prompt, qu
     }
 
     //////////////////////////////////
+
+    // Insert character jailbreak as a last user message (if exists, allowed, preferred, and not using Chat Completion)
+    if (power_user.context.allow_jailbreak && power_user.prefer_character_jailbreak && main_api !== 'openai' && jailbreak) {
+        // Set "original" explicity to empty string since there's no original
+        jailbreak = substituteParams(jailbreak, name1, name2, '');
+        coreChat.push({ mes: jailbreak, is_user: true });
+    }
 
     let chat2 = [];
     let continue_mag = '';
@@ -7349,6 +7356,7 @@ window['SillyTavern'].getContext = function () {
         ModuleWorkerWrapper: ModuleWorkerWrapper,
         getTokenizerModel: getTokenizerModel,
         generateQuietPrompt: generateQuietPrompt,
+        writeExtensionField: writeExtensionField,
         tags: tags,
         tagMap: tag_map,
     };

@@ -1,9 +1,12 @@
 [
-    "zh-cn",
-    "ja-jp",
-    "ko-kr",
-    "ru-ru",
-    "it-it",
-    "nl-nl",
-    "es-spa"
+    { "lang": "ar-sa",  "display": "Arabic" },
+    { "lang": "zh-cn",  "display": "Chinese (Simplified)" },
+    { "lang": "nl-nl",  "display": "Dutch" },
+    { "lang": "it-it",  "display": "Italian" },
+    { "lang": "es-es",  "display": "Spanish" },
+    { "lang": "ja-jp",  "display": "Japanese" },
+    { "lang": "ko-kr",  "display": "Korean" },
+    { "lang": "pt-pt",  "display": "Portuguese (Portugal)" },
+    { "lang": "ru-ru",  "display": "Russian" },
+    { "lang": "vi-vn",  "display": "Vietnamese" }
 ]
