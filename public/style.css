@@ -3708,7 +3708,12 @@ a {
 
 #ARA-sheet {
     font-family: monospace;
-    font-size: calc(var(--mainFontSize) + 0.3rem);
+    font-size: calc(var(--mainFontSize)*1.2);
+}
+
+#ARA-sheet ul {
+    margin-block-end: 0px;
+    margin-block-start: 0.6em;
 }
 
 #ara-panel {
