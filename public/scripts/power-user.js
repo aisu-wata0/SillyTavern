@@ -239,6 +239,7 @@ let power_user = {
     encode_tags: false,
     servers: [],
     bogus_folders: false,
+    show_tag_filters: false,
     aux_field: 'character_version',
     restore_user_input: true,
     reduced_motion: false,
@@ -633,6 +634,7 @@ async function CreateZenSliders(elmnt) {
     if (sliderID == 'min_temp_textgenerationwebui' ||
         sliderID == 'max_temp_textgenerationwebui' ||
         sliderID == 'dynatemp_exponent_textgenerationwebui' ||
+        sliderID == 'smoothing_curve_textgenerationwebui' ||
         sliderID == 'smoothing_factor_textgenerationwebui') {
         decimals = 2;
     }
@@ -693,6 +695,7 @@ async function CreateZenSliders(elmnt) {
         sliderID == 'top_k' ||
         sliderID == 'rep_pen_slope' ||
         sliderID == 'smoothing_factor_textgenerationwebui' ||
+        sliderID == 'smoothing_curve_textgenerationwebui' ||
         sliderID == 'min_length_textgenerationwebui') {
         offVal = 0;
     }
@@ -1077,13 +1080,6 @@ async function applyThemeColor(type) {
 
 async function applyCustomCSS() {
     power_user.custom_css = String(localStorage.getItem(storage_keys.custom_css) ?? '');
-
-    if (power_user.custom_css.includes('@import')) {
-        var removeImport = /@import[^;]+;/gm;
-        power_user.custom_css = power_user.custom_css.replace(removeImport, '');
-        localStorage.setItem(storage_keys.custom_css, power_user.custom_css);
-        toastr.warning('@import not allowed in Custom CSS. @import lines removed.');
-    }
 
     $('#customCSS').val(power_user.custom_css);
     var styleId = 'custom-style';
@@ -2031,6 +2027,13 @@ async function importTheme(file) {
 
     if (themes.some(t => t.name === parsed.name)) {
         throw new Error('Theme with that name already exists');
+    }
+
+    if (typeof parsed.custom_css === 'string' && parsed.custom_css.includes('@import')) {
+        const confirm = await callPopup('This theme contains @import lines in the Custom CSS. Press "Yes" to proceed.', 'confirm', '', { okButton: 'Yes' });
+        if (!confirm) {
+            throw new Error('Theme contains @import lines');
+        }
     }
 
     themes.push(parsed);

@@ -271,15 +271,18 @@
     flex-wrap: wrap;
 }
 
-.flexnowrap {
+.flexnowrap,
+.flexNoWrap {
     flex-wrap: nowrap;
 }
 
-.alignitemscenter {
+.alignitemscenter,
+.alignItemsCenter {
     align-items: center;
 }
 
-.alignitemsstart {
+.alignitemsstart,
+.alignItemsStart {
     align-items: start;
 }
 
@@ -327,6 +330,10 @@
 
 .margin-r5 {
     margin-right: 5px;
+}
+
+.flex0 {
+    flex: 0;
 }
 
 .flex1 {
@@ -515,6 +522,10 @@ textarea:disabled {
 
 .opacity50p {
     opacity: 0.5
+}
+
+.grayscale {
+    filter: grayscale(100%);
 }
 
 .opacity1 {

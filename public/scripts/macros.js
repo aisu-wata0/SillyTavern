@@ -47,6 +47,42 @@ function getLastMessage() {
 }
 
 /**
+ * Returns the last message from the user.
+ * @returns {string} The last message from the user.
+ */
+function getLastUserMessage() {
+    if (!Array.isArray(chat) || chat.length === 0) {
+        return '';
+    }
+
+    for (let i = chat.length - 1; i >= 0; i--) {
+        if (chat[i].is_user && !chat[i].is_system) {
+            return chat[i].mes;
+        }
+    }
+
+    return '';
+}
+
+/**
+ * Returns the last message from the bot.
+ * @returns {string} The last message from the bot.
+ */
+function getLastCharMessage() {
+    if (!Array.isArray(chat) || chat.length === 0) {
+        return '';
+    }
+
+    for (let i = chat.length - 1; i >= 0; i--) {
+        if (!chat[i].is_user && !chat[i].is_system) {
+            return chat[i].mes;
+        }
+    }
+
+    return '';
+}
+
+/**
  * Returns the ID of the last swipe.
  * @returns {string} The 1-based ID of the last swipe
  */
@@ -210,11 +246,22 @@ export function evaluateMacros(content, env) {
         return '';
     }
 
+    // Legacy non-macro substitutions
+    content = content.replace(/<USER>/gi, typeof env.user === 'function' ? env.user() : env.user);
+    content = content.replace(/<BOT>/gi, typeof env.char === 'function' ? env.char() : env.char);
+    content = content.replace(/<CHARIFNOTGROUP>/gi, typeof env.group === 'function' ? env.group() : env.group);
+    content = content.replace(/<GROUP>/gi, typeof env.group === 'function' ? env.group() : env.group);
+
+    // Short circuit if there are no macros
+    if (!content.includes('{{')) {
+        return content;
+    }
+
     content = diceRollReplace(content);
     content = replaceInstructMacros(content);
     content = replaceVariableMacros(content);
     content = content.replace(/{{newline}}/gi, '\n');
-    content = content.replace(/{{input}}/gi, String($('#send_textarea').val()));
+    content = content.replace(/{{input}}/gi, () => String($('#send_textarea').val()));
 
     // Substitute passed-in variables
     for (const varName in env) {
@@ -225,25 +272,21 @@ export function evaluateMacros(content, env) {
     }
 
     content = content.replace(/{{maxPrompt}}/gi, () => String(getMaxContextSize()));
-    content = content.replace(/{{lastMessage}}/gi, getLastMessage());
-    content = content.replace(/{{lastMessageId}}/gi, getLastMessageId());
-    content = content.replace(/{{firstIncludedMessageId}}/gi, getFirstIncludedMessageId());
-    content = content.replace(/{{lastSwipeId}}/gi, getLastSwipeId());
-    content = content.replace(/{{currentSwipeId}}/gi, getCurrentSwipeId());
-
-    // Legacy non-macro substitutions
-    content = content.replace(/<USER>/gi, typeof env.user === 'function' ? env.user() : env.user);
-    content = content.replace(/<BOT>/gi, typeof env.char === 'function' ? env.char() : env.char);
-    content = content.replace(/<CHARIFNOTGROUP>/gi, typeof env.group === 'function' ? env.group() : env.group);
-    content = content.replace(/<GROUP>/gi, typeof env.group === 'function' ? env.group() : env.group);
+    content = content.replace(/{{lastMessage}}/gi, () => getLastMessage());
+    content = content.replace(/{{lastMessageId}}/gi, () => getLastMessageId());
+    content = content.replace(/{{lastUserMessage}}/gi, () => getLastUserMessage());
+    content = content.replace(/{{lastCharMessage}}/gi, () => getLastCharMessage());
+    content = content.replace(/{{firstIncludedMessageId}}/gi, () => getFirstIncludedMessageId());
+    content = content.replace(/{{lastSwipeId}}/gi, () => getLastSwipeId());
+    content = content.replace(/{{currentSwipeId}}/gi, () => getCurrentSwipeId());
 
     content = content.replace(/\{\{\/\/([\s\S]*?)\}\}/gm, '');
 
-    content = content.replace(/{{time}}/gi, moment().format('LT'));
-    content = content.replace(/{{date}}/gi, moment().format('LL'));
-    content = content.replace(/{{weekday}}/gi, moment().format('dddd'));
-    content = content.replace(/{{isotime}}/gi, moment().format('HH:mm'));
-    content = content.replace(/{{isodate}}/gi, moment().format('YYYY-MM-DD'));
+    content = content.replace(/{{time}}/gi, () => moment().format('LT'));
+    content = content.replace(/{{date}}/gi, () => moment().format('LL'));
+    content = content.replace(/{{weekday}}/gi, () => moment().format('dddd'));
+    content = content.replace(/{{isotime}}/gi, () => moment().format('HH:mm'));
+    content = content.replace(/{{isodate}}/gi, () => moment().format('YYYY-MM-DD'));
 
     content = content.replace(/{{datetimeformat +([^}]*)}}/gi, (_, format) => {
         const formattedTime = moment().format(format);

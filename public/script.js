@@ -156,14 +156,20 @@ import { COMMENT_NAME_DEFAULT, executeSlashCommands, getSlashCommandsHelp, proce
 import {
     tag_map,
     tags,
+    filterByTagState,
+    isBogusFolder,
+    isBogusFolderOpen,
+    chooseBogusFolder,
+    getTagBlock,
     loadTagsSettings,
     printTagFilters,
-    getTagsList,
-    appendTagToList,
+    getTagKeyForEntity,
+    printTagList,
     createTagMapFromList,
     renameTagKey,
     importTags,
     tag_filter_types,
+    compareTagsForSort,
 } from './scripts/tags.js';
 import {
     SECRET_KEYS,
@@ -243,6 +249,7 @@ export {
     scrollChatToBottom,
     isStreamingEnabled,
     getThumbnailUrl,
+    buildAvatarList,
     getStoppingStrings,
     reloadMarkdownProcessor,
     getCurrentChatId,
@@ -400,6 +407,9 @@ export const event_types = {
     GROUP_MEMBER_DRAFTED: 'group_member_drafted',
     WORLD_INFO_ACTIVATED: 'world_info_activated',
     TEXT_COMPLETION_SETTINGS_READY: 'text_completion_settings_ready',
+    CHARACTER_FIRST_MESSAGE_SELECTED: 'character_first_message_selected',
+    // TODO: Naming convention is inconsistent with other events
+    CHARACTER_DELETED: 'characterDeleted',
 };
 
 export const eventSource = new EventEmitter();
@@ -464,6 +474,10 @@ let exportPopper = Popper.createPopper(document.getElementById('export_button'),
 let rawPromptPopper = Popper.createPopper(document.getElementById('dialogue_popup'), document.getElementById('rawPromptPopup'), {
     placement: 'right',
 });
+
+// Saved here for performance reasons
+const messageTemplate = $('#message_template .mes');
+const chatElement = $('#chat');
 
 let dialogueResolve = null;
 let dialogueCloseStop = false;
@@ -745,6 +759,7 @@ let create_save = {
     alternate_greetings: [],
     depth_prompt_prompt: '',
     depth_prompt_depth: depth_prompt_depth_default,
+    extensions: {},
 };
 
 //animation right menu
@@ -796,8 +811,11 @@ let token;
 
 var PromptArrayItemForRawPromptDisplay;
 
+/** The tag of the active character. (NOT the id) */
 export let active_character = '';
+/** The tag of the active group. (Coincidentally also the id) */
 export let active_group = '';
+
 export const entitiesFilter = new FilterHelper(debounce(printCharacters, 100));
 export const personasFilter = new FilterHelper(debounce(getUserAvatars, 100));
 
@@ -870,12 +888,12 @@ export function setAnimationDuration(ms = null) {
     animation_duration = ms ?? ANIMATION_DURATION_DEFAULT;
 }
 
-export function setActiveCharacter(character) {
-    active_character = character;
+export function setActiveCharacter(entityOrKey) {
+    active_character = getTagKeyForEntity(entityOrKey);
 }
 
-export function setActiveGroup(group) {
-    active_group = group;
+export function setActiveGroup(entityOrKey) {
+    active_group = getTagKeyForEntity(entityOrKey);
 }
 
 /**
@@ -1161,23 +1179,6 @@ export async function selectCharacterById(id) {
     }
 }
 
-function getTagBlock(item, entities) {
-    let count = 0;
-
-    for (const entity of entities) {
-        if (entitiesFilter.isElementTagged(entity, item.id)) {
-            count++;
-        }
-    }
-
-    const template = $('#bogus_folder_template .bogus_folder_select').clone();
-    template.attr({ 'tagid': item.id, 'id': `BogusFolder${item.id}` });
-    template.find('.avatar').css({ 'background-color': item.color, 'color': item.color2 });
-    template.find('.ch_name').text(item.name);
-    template.find('.bogus_folder_counter').text(count);
-    return template;
-}
-
 function getBackBlock() {
     const template = $('#bogus_folder_back_template .bogus_folder_select').clone();
     return template;
@@ -1188,12 +1189,26 @@ function getEmptyBlock() {
     const texts = ['Here be dragons', 'Otterly empty', 'Kiwibunga', 'Pump-a-Rum', 'Croak it'];
     const roll = new Date().getMinutes() % icons.length;
     const emptyBlock = `
-    <div class="empty_block">
+    <div class="text_block empty_block">
         <i class="fa-solid ${icons[roll]} fa-4x"></i>
         <h1>${texts[roll]}</h1>
         <p>There are no items to display.</p>
     </div>`;
     return $(emptyBlock);
+}
+
+/**
+ * @param {number} hidden Number of hidden characters
+ */
+function getHiddenBlock(hidden) {
+    const hiddenBlock = `
+    <div class="text_block hidden_block">
+        <small>
+            <p>${hidden} ${hidden > 1 ? 'characters' : 'character'} hidden.</p>
+            <div class="fa-solid fa-circle-info opacity50p" data-i18n="[title]Characters and groups hidden by filters or closed folders" title="Characters and groups hidden by filters or closed folders"></div>
+        </small>
+    </div>`;
+    return $(hiddenBlock);
 }
 
 function getCharacterBlock(item, id) {
@@ -1204,9 +1219,9 @@ function getCharacterBlock(item, id) {
     // Populate the template
     const template = $('#character_template .character_select').clone();
     template.attr({ 'chid': id, 'id': `CharID${id}` });
-    template.find('img').attr('src', this_avatar);
-    template.find('.avatar').attr('title', item.avatar);
-    template.find('.ch_name').text(item.name);
+    template.find('img').attr('src', this_avatar).attr('alt', item.name);
+    template.find('.avatar').attr('title', `[Character] ${item.name}`);
+    template.find('.ch_name').text(item.name).attr('title', `[Character] ${item.name}`);
     if (power_user.show_card_avatar_urls) {
         template.find('.ch_avatar_url').text(item.avatar);
     }
@@ -1232,9 +1247,8 @@ function getCharacterBlock(item, id) {
     }
 
     // Display inline tags
-    const tags = getTagsList(item.avatar);
     const tagsElement = template.find('.tags');
-    tags.forEach(tag => appendTagToList(tagsElement, tag, {}));
+    printTagList(tagsElement, { forEntityOrKey: id });
 
     // Add to the list
     return template;
@@ -1245,11 +1259,6 @@ async function printCharacters(fullRefresh = false) {
         saveCharactersPage = 0;
         printTagFilters(tag_filter_types.character);
         printTagFilters(tag_filter_types.group_member);
-
-        // Return to main list
-        if (isBogusFolderOpen()) {
-            entitiesFilter.setFilterData(FILTER_TYPES.TAG, { excluded: [], selected: [] });
-        }
 
         await delay(1);
     }
@@ -1279,19 +1288,28 @@ async function printCharacters(fullRefresh = false) {
             if (!data.length) {
                 $(listId).append(getEmptyBlock());
             }
+            let displayCount = 0;
             for (const i of data) {
                 switch (i.type) {
                     case 'character':
                         $(listId).append(getCharacterBlock(i.item, i.id));
+                        displayCount++;
                         break;
                     case 'group':
                         $(listId).append(getGroupBlock(i.item));
+                        displayCount++;
                         break;
                     case 'tag':
-                        $(listId).append(getTagBlock(i.item, entities));
+                        $(listId).append(getTagBlock(i.item, i.entities, i.hidden));
                         break;
                 }
             }
+
+            const hidden = (characters.length + groups.length) - displayCount;
+            if (hidden > 0) {
+                $(listId).append(getHiddenBlock(hidden));
+            }
+
             eventSource.emit(event_types.CHARACTER_PAGE_LOADED);
         },
         afterSizeSelectorChange: function (e) {
@@ -1308,15 +1326,7 @@ async function printCharacters(fullRefresh = false) {
     favsToHotswap();
 }
 
-/**
- * Indicates whether a user is currently in a bogus folder.
- * @returns {boolean} If currently viewing a folder
- */
-function isBogusFolderOpen() {
-    return !!entitiesFilter.getFilterData(FILTER_TYPES.TAG)?.bogus;
-}
-
-export function getEntitiesList({ doFilter } = {}) {
+export function getEntitiesList({ doFilter = false, doSort = true } = {}) {
     function characterToEntity(character, id) {
         return { item: character, id, type: 'character' };
     }
@@ -1326,36 +1336,53 @@ export function getEntitiesList({ doFilter } = {}) {
     }
 
     function tagToEntity(tag) {
-        return { item: structuredClone(tag), id: tag.id, type: 'tag' };
+        return { item: structuredClone(tag), id: tag.id, type: 'tag', entities: [] };
     }
 
     let entities = [
         ...characters.map((item, index) => characterToEntity(item, index)),
         ...groups.map(item => groupToEntity(item)),
-        ...(power_user.bogus_folders ? tags.map(item => tagToEntity(item)) : []),
+        ...(power_user.bogus_folders ? tags.filter(isBogusFolder).sort(compareTagsForSort).map(item => tagToEntity(item)) : []),
     ];
 
+    // We need to do multiple filter runs in a specific order, otherwise different settings might override each other
+    // and screw up tags and search filter, sub lists or similar.
+    // The specific filters are written inside the "filterByTagState" method and its different parameters.
+    // Generally what we do is the following:
+    //   1. First swipe over the list to remove the most obvious things
+    //   2. Build sub entity lists for all folders, filtering them similarly to the second swipe
+    //   3. We do the last run, where global filters are applied, and the search filters last
+
+    // First run filters, that will hide what should never be displayed
     if (doFilter) {
+        entities = filterByTagState(entities);
+    }
+
+    // Run over all entities between first and second filter to save some states
+    for (const entity of entities) {
+        // For folders, we remember the sub entities so they can be displayed later, even if they might be filtered
+        // Those sub entities should be filtered and have the search filters applied too
+        if (entity.type === 'tag') {
+            let subEntities = filterByTagState(entities, { subForEntity: entity, filterHidden: false });
+            const subCount = subEntities.length;
+            subEntities = filterByTagState(entities, { subForEntity: entity });
+            if (doFilter) {
+                subEntities = entitiesFilter.applyFilters(subEntities);
+            }
+            entity.entities = subEntities;
+            entity.hidden = subCount - subEntities.length;
+        }
+    }
+
+    // Second run filters, hiding whatever should be filtered later
+    if (doFilter) {
+        entities = filterByTagState(entities, { globalDisplayFilters: true });
         entities = entitiesFilter.applyFilters(entities);
     }
 
-    if (isBogusFolderOpen()) {
-        // Get tags of entities within the bogus folder
-        const filterData = structuredClone(entitiesFilter.getFilterData(FILTER_TYPES.TAG));
-        entities = entities.filter(x => x.type !== 'tag');
-        const otherTags = tags.filter(x => !filterData.selected.includes(x.id));
-        const bogusTags = [];
-        for (const entity of entities) {
-            for (const tag of otherTags) {
-                if (!bogusTags.includes(tag) && entitiesFilter.isElementTagged(entity, tag.id)) {
-                    bogusTags.push(tag);
-                }
-            }
-        }
-        entities.push(...bogusTags.map(item => tagToEntity(item)));
+    if (doSort) {
+        sortEntitiesList(entities);
     }
-
-    sortEntitiesList(entities);
     return entities;
 }
 
@@ -1522,7 +1549,7 @@ async function printMessages() {
 
     for (let i = startIndex; i < chat.length; i++) {
         const item = chat[i];
-        addOneMessage(item, { scroll: i === chat.length - 1, forceId: i });
+        addOneMessage(item, { scroll: i === chat.length - 1, forceId: i, showSwipes: false });
     }
 
     // Scroll to bottom when all images are loaded
@@ -1539,6 +1566,11 @@ async function printMessages() {
             }
         }
     }
+
+    $('#chat .mes').removeClass('last_mes');
+    $('#chat .mes').last().addClass('last_mes');
+    hideSwipeButtons();
+    showSwipeButtons();
 
     function incrementAndCheck() {
         imagesLoaded++;
@@ -1625,6 +1657,10 @@ export function sendTextareaMessage() {
 function messageFormatting(mes, ch_name, isSystem, isUser, messageId) {
     if (!mes) {
         return '';
+    }
+
+    if (Number(messageId) === 0 && !isSystem && !isUser) {
+        mes = substituteParams(mes);
     }
 
     mesForShowdownParse = mes;
@@ -1816,7 +1852,7 @@ function getMessageFromTemplate({
     tokenCount,
     extra,
 } = {}) {
-    const mes = $('#message_template .mes').clone();
+    const mes = messageTemplate.clone();
     mes.attr({
         'mesid': mesId,
         'ch_name': characterName,
@@ -1910,8 +1946,8 @@ export function addCopyToCodeBlocks(messageElement) {
 }
 
 
-function addOneMessage(mes, { type = 'normal', insertAfter = null, scroll = true, insertBefore = null, forceId = null } = {}) {
-    var messageText = mes['mes'];
+function addOneMessage(mes, { type = 'normal', insertAfter = null, scroll = true, insertBefore = null, forceId = null, showSwipes = true } = {}) {
+    let messageText = mes['mes'];
     const momentDate = timestampToMoment(mes.send_date);
     const timestamp = momentDate.isValid() ? momentDate.format('LL LT') : '';
 
@@ -1926,7 +1962,7 @@ function addOneMessage(mes, { type = 'normal', insertAfter = null, scroll = true
         mes.swipes = [mes.mes];
     }
 
-    var avatarImg = getUserAvatar(user_avatar);
+    let avatarImg = getUserAvatar(user_avatar);
     const isSystem = mes.is_system;
     const title = mes.title;
     generatedPromptCache = '';
@@ -1962,17 +1998,7 @@ function addOneMessage(mes, { type = 'normal', insertAfter = null, scroll = true
     );
     const bias = messageFormatting(mes.extra?.bias ?? '', '', false, false, -1);
     let bookmarkLink = mes?.extra?.bookmark_link ?? '';
-    // Verify bookmarked chat still exists
-    // Cohee: Commented out for now. I'm worried of performance issues.
-    /*if (bookmarkLink !== '') {
-        let chat_names = selected_group
-            ? getGroupChatNames(selected_group)
-            : Object.values(getPastCharacterChats()).map(({ file_name }) => file_name);
 
-        if (!chat_names.includes(bookmarkLink)) {
-            bookmarkLink = ''
-        }
-    }*/
     let params = {
         mesId: forceId ?? chat.length - 1,
         characterName: mes.name,
@@ -1989,22 +2015,18 @@ function addOneMessage(mes, { type = 'normal', insertAfter = null, scroll = true
         ...formatGenerationTimer(mes.gen_started, mes.gen_finished, mes.extra?.token_count),
     };
 
-    const HTMLForEachMes = getMessageFromTemplate(params);
+    const renderedMessage = getMessageFromTemplate(params);
 
     if (type !== 'swipe') {
         if (!insertAfter && !insertBefore) {
-            $('#chat').append(HTMLForEachMes);
+            chatElement.append(renderedMessage);
         }
         else if (insertAfter) {
-            const target = $('#chat').find(`.mes[mesid="${insertAfter}"]`);
-            $(HTMLForEachMes).insertAfter(target);
-            $(HTMLForEachMes).find('.swipe_left').css('display', 'none');
-            $(HTMLForEachMes).find('.swipe_right').css('display', 'none');
+            const target = chatElement.find(`.mes[mesid="${insertAfter}"]`);
+            $(renderedMessage).insertAfter(target);
         } else {
-            const target = $('#chat').find(`.mes[mesid="${insertBefore}"]`);
-            $(HTMLForEachMes).insertBefore(target);
-            $(HTMLForEachMes).find('.swipe_left').css('display', 'none');
-            $(HTMLForEachMes).find('.swipe_right').css('display', 'none');
+            const target = chatElement.find(`.mes[mesid="${insertBefore}"]`);
+            $(renderedMessage).insertBefore(target);
         }
     }
 
@@ -2015,49 +2037,19 @@ function addOneMessage(mes, { type = 'normal', insertAfter = null, scroll = true
     const isSmallSys = mes?.extra?.isSmallSys;
     newMessage.data('isSystem', isSystem);
 
-    if (isSystem) {
-        // newMessage.find(".mes_edit").hide();
-        newMessage.find('.mes_prompt').hide(); //don't need prompt button for sys
-    }
-
     if (isSmallSys === true) {
         newMessage.addClass('smallSysMes');
-    }
-
-    // don't need prompt button for user
-    if (params.isUser === true) {
-        newMessage.find('.mes_prompt').hide();
-        //console.log(`hiding prompt for user mesID ${params.mesId}`);
     }
 
     //shows or hides the Prompt display button
     let mesIdToFind = type == 'swipe' ? params.mesId - 1 : params.mesId;  //Number(newMessage.attr('mesId'));
 
     //if we have itemized messages, and the array isn't null..
-    if (params.isUser === false && itemizedPrompts.length !== 0 && itemizedPrompts.length !== null) {
-        // console.log('looking through itemized prompts...');
-        //console.log(`mesIdToFind = ${mesIdToFind} from ${params.avatarImg}`);
-        //console.log(`itemizedPrompts.length = ${itemizedPrompts.length}`)
-        //console.log(itemizedPrompts);
-
-        for (var i = 0; i < itemizedPrompts.length; i++) {
-            //console.log(`itemized array item ${i} is MesID ${Number(itemizedPrompts[i].mesId)}, does it match ${Number(mesIdToFind)}?`);
-            if (Number(itemizedPrompts[i].mesId) === Number(mesIdToFind)) {
-                newMessage.find('.mes_prompt').show();
-                //console.log(`showing button for mesID ${params.mesId} from ${params.characterName}`);
-                break;
-
-            } /*else {
-                console.log(`no cache obj for mesID ${mesIdToFind}, hiding this prompt button`);
-                newMessage.find(".mes_prompt").hide();
-                console.log(itemizedPrompts);
-            } */
+    if (params.isUser === false && Array.isArray(itemizedPrompts) && itemizedPrompts.length > 0) {
+        const itemizedPrompt = itemizedPrompts.find(x => Number(x.mesId) === Number(mesIdToFind));
+        if (itemizedPrompt) {
+            newMessage.find('.mes_prompt').show();
         }
-    } else {
-        //console.log('itemizedprompt array empty null, or user, hiding this prompt buttons');
-        //$(".mes_prompt").hide();
-        newMessage.find('.mes_prompt').hide();
-        //console.log(itemizedPrompts);
     }
 
     newMessage.find('.avatar img').on('error', function () {
@@ -2066,38 +2058,36 @@ function addOneMessage(mes, { type = 'normal', insertAfter = null, scroll = true
     });
 
     if (type === 'swipe') {
-        const swipeMessage = $('#chat').find(`[mesid="${chat.length - 1}"]`);
-        swipeMessage.find('.mes_text').html('');
-        swipeMessage.find('.mes_text').append(messageText);
-        appendMediaToMessage(mes, swipeMessage);
-        swipeMessage.attr('title', title);
+        const swipeMessage = chatElement.find(`[mesid="${chat.length - 1}"]`);
+        swipeMessage.find('.mes_text').html(messageText).attr('title', title);
         swipeMessage.find('.timestamp').text(timestamp).attr('title', `${params.extra.api} - ${params.extra.model}`);
+        appendMediaToMessage(mes, swipeMessage);
         if (power_user.timestamp_model_icon && params.extra?.api) {
             insertSVGIcon(swipeMessage, params.extra);
         }
 
         if (mes.swipe_id == mes.swipes.length - 1) {
-            swipeMessage.find('.mes_timer').text(params.timerValue);
-            swipeMessage.find('.mes_timer').attr('title', params.timerTitle);
+            swipeMessage.find('.mes_timer').text(params.timerValue).attr('title', params.timerTitle);
             swipeMessage.find('.tokenCounterDisplay').text(`${params.tokenCount}t`);
         } else {
-            swipeMessage.find('.mes_timer').html('');
-            swipeMessage.find('.tokenCounterDisplay').html('');
+            swipeMessage.find('.mes_timer').empty();
+            swipeMessage.find('.tokenCounterDisplay').empty();
         }
     } else {
         const messageId = forceId ?? chat.length - 1;
-        $('#chat').find(`[mesid="${messageId}"]`).find('.mes_text').append(messageText);
+        chatElement.find(`[mesid="${messageId}"] .mes_text`).append(messageText);
         appendMediaToMessage(mes, newMessage);
-        hideSwipeButtons();
+        showSwipes && hideSwipeButtons();
     }
 
     addCopyToCodeBlocks(newMessage);
 
-    $('#chat .mes').last().addClass('last_mes');
-    $('#chat .mes').eq(-2).removeClass('last_mes');
-
-    hideSwipeButtons();
-    showSwipeButtons();
+    if (showSwipes) {
+        $('#chat .mes').last().addClass('last_mes');
+        $('#chat .mes').eq(-2).removeClass('last_mes');
+        hideSwipeButtons();
+        showSwipeButtons();
+    }
 
     // Don't scroll if not inserting last
     if (!insertAfter && !insertBefore && scroll) {
@@ -2171,7 +2161,6 @@ function formatGenerationTimer(gen_started, gen_finished, tokenCount) {
 
 function scrollChatToBottom() {
     if (power_user.auto_scroll_chat_to_bottom) {
-        const chatElement = $('#chat');
         let position = chatElement[0].scrollHeight;
 
         if (power_user.waifuMode) {
@@ -5293,6 +5282,51 @@ function getThumbnailUrl(type, file) {
     return `/thumbnail?type=${type}&file=${encodeURIComponent(file)}`;
 }
 
+function buildAvatarList(block, entities, { templateId = 'inline_avatar_template', empty = true, selectable = false, highlightFavs = true } = {}) {
+    if (empty) {
+        block.empty();
+    }
+
+    for (const entity of entities) {
+        const id = entity.id;
+
+        // Populate the template
+        const avatarTemplate = $(`#${templateId} .avatar`).clone();
+
+        let this_avatar = default_avatar;
+        if (entity.item.avatar !== undefined && entity.item.avatar != 'none') {
+            this_avatar = getThumbnailUrl('avatar', entity.item.avatar);
+        }
+
+        avatarTemplate.attr('data-type', entity.type);
+        avatarTemplate.attr({ 'chid': id, 'id': `CharID${id}` });
+        avatarTemplate.find('img').attr('src', this_avatar).attr('alt', entity.item.name);
+        avatarTemplate.attr('title', `[Character] ${entity.item.name}`);
+        if (highlightFavs) {
+            avatarTemplate.toggleClass('is_fav', entity.item.fav || entity.item.fav == 'true');
+            avatarTemplate.find('.ch_fav').val(entity.item.fav);
+        }
+
+        // If this is a group, we need to hack slightly. We still want to keep most of the css classes and layout, but use a group avatar instead.
+        if (entity.type === 'group') {
+            const grpTemplate = getGroupAvatar(entity.item);
+
+            avatarTemplate.addClass(grpTemplate.attr('class'));
+            avatarTemplate.empty();
+            avatarTemplate.append(grpTemplate.children());
+            avatarTemplate.attr('title', `[Group] ${entity.item.name}`);
+        }
+
+        if (selectable) {
+            avatarTemplate.addClass('selectable');
+            avatarTemplate.toggleClass('character_select', entity.type === 'character');
+            avatarTemplate.toggleClass('group_select', entity.type === 'group');
+        }
+
+        block.append(avatarTemplate);
+    }
+}
+
 async function getChat() {
     //console.log('/api/chats/get -- entered for -- ' + characters[this_chid].name);
     try {
@@ -5319,9 +5353,12 @@ async function getChat() {
         await getChatResult();
         eventSource.emit('chatLoaded', { detail: { id: this_chid, character: characters[this_chid] } });
 
+        // Focus on the textarea if not already focused on a visible text input
         setTimeout(function () {
-            $('#send_textarea').click();
-            $('#send_textarea').focus();
+            if ($(document.activeElement).is('input:visible, textarea:visible')) {
+                return;
+            }
+            $('#send_textarea').trigger('click').trigger('focus');
         }, 200);
     } catch (error) {
         await getChatResult();
@@ -5358,12 +5395,12 @@ function getFirstMessage() {
         is_user: false,
         is_system: false,
         send_date: getMessageTimeStamp(),
-        mes: substituteParams(getRegexedString(firstMes, regex_placement.AI_OUTPUT)),
+        mes: getRegexedString(firstMes, regex_placement.AI_OUTPUT),
         extra: {},
     };
 
     if (Array.isArray(alternateGreetings) && alternateGreetings.length > 0) {
-        const swipes = [message.mes, ...(alternateGreetings.map(greeting => substituteParams(getRegexedString(greeting, regex_placement.AI_OUTPUT))))];
+        const swipes = [message.mes, ...(alternateGreetings.map(greeting => getRegexedString(greeting, regex_placement.AI_OUTPUT)))];
         message['swipe_id'] = 0;
         message['swipes'] = swipes;
         message['swipe_info'] = [];
@@ -7184,6 +7221,8 @@ async function createOrEditCharacter(e) {
                 formData.append('alternate_greetings', value);
             }
 
+            formData.append('extensions', JSON.stringify(create_save.extensions));
+
             await jQuery.ajax({
                 type: 'POST',
                 url: url,
@@ -7216,6 +7255,7 @@ async function createOrEditCharacter(e) {
                         { id: '#character_json_data', callback: () => { } },
                         { id: '#alternate_greetings_template', callback: value => create_save.alternate_greetings = value, defaultValue: [] },
                         { id: '#character_world', callback: value => create_save.world = value },
+                        { id: '#_character_extensions_fake', callback: value => create_save.extensions = {} },
                     ];
 
                     fields.forEach(field => {
@@ -7336,7 +7376,7 @@ window['SillyTavern'].getContext = function () {
         chatMetadata: chat_metadata,
         streamingProcessor,
         eventSource: eventSource,
-        event_types: event_types,
+        eventTypes: event_types,
         addOneMessage: addOneMessage,
         generate: Generate,
         getTokenCount: getTokenCount,
@@ -7351,6 +7391,7 @@ window['SillyTavern'].getContext = function () {
         saveReply,
         registerSlashCommand: registerSlashCommand,
         executeSlashCommands: executeSlashCommands,
+        timestampToMoment: timestampToMoment,
         /**
          * @deprecated Handlebars for extensions are no longer supported.
          */
@@ -7364,8 +7405,16 @@ window['SillyTavern'].getContext = function () {
         getTokenizerModel: getTokenizerModel,
         generateQuietPrompt: generateQuietPrompt,
         writeExtensionField: writeExtensionField,
+        getThumbnailUrl: getThumbnailUrl,
+        selectCharacterById: selectCharacterById,
         tags: tags,
         tagMap: tag_map,
+        menuType: menu_type,
+        createCharacterData: create_save,
+        /**
+         * @deprecated Legacy snake-case naming, compatibility with old extensions
+         */
+        event_types: event_types,
     };
 };
 
@@ -8153,6 +8202,11 @@ function addDebugFunctions() {
             await reloadCurrentChat();
         }
     });
+
+    registerDebugFunction('toggleEventTracing', 'Toggle event tracing', 'Useful to see what triggered a certain event.', () => {
+        localStorage.setItem('eventTracing', localStorage.getItem('eventTracing') === 'true' ? 'false' : 'true');
+        toastr.info('Event tracing is now ' + (localStorage.getItem('eventTracing') === 'true' ? 'enabled' : 'disabled'));
+    });
 }
 
 jQuery(async function () {
@@ -8289,25 +8343,8 @@ jQuery(async function () {
 
     $(document).on('click', '.bogus_folder_select', function () {
         const tagId = $(this).attr('tagid');
-        console.log('Bogus folder clicked', tagId);
-
-        const filterData = structuredClone(entitiesFilter.getFilterData(FILTER_TYPES.TAG));
-
-        if (!Array.isArray(filterData.selected)) {
-            filterData.selected = [];
-            filterData.excluded = [];
-            filterData.bogus = false;
-        }
-
-        if (tagId === 'back') {
-            filterData.selected.pop();
-            filterData.bogus = filterData.selected.length > 0;
-        } else {
-            filterData.selected.push(tagId);
-            filterData.bogus = true;
-        }
-
-        entitiesFilter.setFilterData(FILTER_TYPES.TAG, filterData);
+        console.debug('Bogus folder clicked', tagId);
+        chooseBogusFolder($(this), tagId);
     });
 
     $(document).on('input', '.edit_textarea', function () {
@@ -8346,7 +8383,15 @@ jQuery(async function () {
         }
     });
 
-    $(document).on('click', '#user_avatar_block .avatar-container', setUserAvatar);
+    $(document).on('click', '#user_avatar_block .avatar-container', function () {
+        const imgfile = $(this).attr('imgfile');
+        setUserAvatar(imgfile);
+
+        // force firstMes {{user}} update on persona switch
+        if (this_chid >= 0 && !selected_group && chat.length === 1) {
+            $('#firstmessage_textarea').trigger('input');
+        }
+    });
     $(document).on('click', '#user_avatar_block .avatar_upload', function () {
         $('#avatar_upload_overwrite').val('');
         $('#avatar_upload_file').trigger('click');
@@ -8448,8 +8493,8 @@ jQuery(async function () {
         }
         if (popup_type == 'del_ch') {
             const deleteChats = !!$('#del_char_checkbox').prop('checked');
+            eventSource.emit(event_types.CHARACTER_DELETED, { id: this_chid, character: characters[this_chid] });
             await handleDeleteCharacter(popup_type, this_chid, deleteChats);
-            eventSource.emit('characterDeleted', { id: this_chid, character: characters[this_chid] });
         }
         if (popup_type == 'alternate_greeting' && menu_type !== 'create') {
             createOrEditCharacter();
@@ -8471,8 +8516,8 @@ jQuery(async function () {
             await clearChat();
             chat.length = 0;
 
-            chat_file_for_del = getCurrentChatDetails().sessionName
-            const isDelChatCheckbox = document.getElementById('del_chat_checkbox').checked
+            chat_file_for_del = getCurrentChatDetails().sessionName;
+            const isDelChatCheckbox = document.getElementById('del_chat_checkbox').checked;
 
             if (selected_group) {
                 //Fix it; When you're creating a new group chat (but not when initially converting from the existing regular chat), the first greeting message doesn't automatically get translated.
@@ -8727,44 +8772,23 @@ jQuery(async function () {
     });
 
     $('#api_button_textgenerationwebui').on('click', async function (e) {
-        const mancerKey = String($('#api_key_mancer').val()).trim();
-        if (mancerKey.length) {
-            await writeSecret(SECRET_KEYS.MANCER, mancerKey);
-        }
+        const keys = [
+            { id: 'api_key_mancer', secret: SECRET_KEYS.MANCER },
+            { id: 'api_key_aphrodite', secret: SECRET_KEYS.APHRODITE },
+            { id: 'api_key_tabby', secret: SECRET_KEYS.TABBY },
+            { id: 'api_key_togetherai', secret: SECRET_KEYS.TOGETHERAI },
+            { id: 'api_key_ooba', secret: SECRET_KEYS.OOBA },
+            { id: 'api_key_infermaticai', secret: SECRET_KEYS.INFERMATICAI },
+            { id: 'api_key_dreamgen', secret: SECRET_KEYS.DREAMGEN },
+            { id: 'api_key_openrouter-tg', secret: SECRET_KEYS.OPENROUTER },
+            { id: 'api_key_koboldcpp', secret: SECRET_KEYS.KOBOLDCPP },
+        ];
 
-        const aphroditeKey = String($('#api_key_aphrodite').val()).trim();
-        if (aphroditeKey.length) {
-            await writeSecret(SECRET_KEYS.APHRODITE, aphroditeKey);
-        }
-
-        const tabbyKey = String($('#api_key_tabby').val()).trim();
-        if (tabbyKey.length) {
-            await writeSecret(SECRET_KEYS.TABBY, tabbyKey);
-        }
-
-        const togetherKey = String($('#api_key_togetherai').val()).trim();
-        if (togetherKey.length) {
-            await writeSecret(SECRET_KEYS.TOGETHERAI, togetherKey);
-        }
-
-        const oobaKey = String($('#api_key_ooba').val()).trim();
-        if (oobaKey.length) {
-            await writeSecret(SECRET_KEYS.OOBA, oobaKey);
-        }
-
-        const infermaticAIKey = String($('#api_key_infermaticai').val()).trim();
-        if (infermaticAIKey.length) {
-            await writeSecret(SECRET_KEYS.INFERMATICAI, infermaticAIKey);
-        }
-
-        const dreamgenKey = String($('#api_key_dreamgen').val()).trim();
-        if (dreamgenKey.length) {
-            await writeSecret(SECRET_KEYS.DREAMGEN, dreamgenKey);
-        }
-
-        const openRouterKey = String($('#api_key_openrouter-tg').val()).trim();
-        if (openRouterKey.length) {
-            await writeSecret(SECRET_KEYS.OPENROUTER, openRouterKey);
+        for (const key of keys) {
+            const keyValue = String($(`#${key.id}`).val()).trim();
+            if (keyValue.length) {
+                await writeSecret(key.secret, keyValue);
+            }
         }
 
         validateTextGenUrl();
