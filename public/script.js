@@ -1,4 +1,4 @@
-import { humanizedDateTime, favsToHotswap, getMessageTimeStamp, dragElement, isMobile, initRossMods } from './scripts/RossAscends-mods.js';
+import { humanizedDateTime, favsToHotswap, getMessageTimeStamp, dragElement, isMobile, initRossMods, shouldSendOnEnter } from './scripts/RossAscends-mods.js';
 import { userStatsHandler, statMesProcess, initStats } from './scripts/stats.js';
 import {
     generateKoboldWithStreaming,
@@ -81,6 +81,7 @@ import {
     switchSimpleMode,
     flushEphemeralStoppingStrings,
     context_presets,
+    resetMovableStyles,
 } from './scripts/power-user.js';
 
 import {
@@ -149,6 +150,7 @@ import {
     humanFileSize,
     Stopwatch,
     isValidUrl,
+    ensureImageFormatSupported,
 } from './scripts/utils.js';
 
 import { ModuleWorkerWrapper, doDailyExtensionUpdatesCheck, extension_settings, getContext, loadExtensionSettings, renderExtensionTemplate, runGenerationInterceptors, saveMetadataDebounced, writeExtensionField } from './scripts/extensions.js';
@@ -841,12 +843,12 @@ async function firstLoadInit() {
         throw new Error('Initialization failed');
     }
 
+    await getClientVersion();
+    await readSecretState();
+    await getSettings();
     getSystemMessages();
     sendSystemMessage(system_message_types.WELCOME);
     initLocales();
-    await readSecretState();
-    await getClientVersion();
-    await getSettings();
     await getUserAvatars(true, user_avatar);
     await getCharacters();
     await getBackgrounds();
@@ -4748,7 +4750,7 @@ async function saveReply(type, getMessage, fromStreaming, title, swipes) {
         type = 'normal';
     }
 
-    if (chat.length && typeof chat[chat.length - 1]['extra'] !== 'object') {
+    if (chat.length && (!chat[chat.length - 1]['extra'] || typeof chat[chat.length - 1]['extra'] !== 'object')) {
         chat[chat.length - 1]['extra'] = {};
     }
 
@@ -4897,7 +4899,7 @@ async function saveReply(type, getMessage, fromStreaming, title, swipes) {
 
 function saveImageToMessage(img, mes) {
     if (mes && img.image) {
-        if (typeof mes.extra !== 'object') {
+        if (!mes.extra || typeof mes.extra !== 'object') {
             mes.extra = {};
         }
         mes.extra.image = img.image;
@@ -5551,7 +5553,7 @@ function changeMainAPI() {
  * @returns {Promise<string[]>} List of avatar file names
  */
 export async function getUserAvatars(doRender = true, openPageAt = '') {
-    const response = await fetch('/getuseravatars', {
+    const response = await fetch('/api/avatars/get', {
         method: 'POST',
         headers: getRequestHeaders(),
     });
@@ -5698,7 +5700,7 @@ async function uploadUserAvatar(e) {
 
     const formData = new FormData($('#form_upload_avatar').get(0));
     const dataUrl = await getBase64Async(file);
-    let url = '/uploaduseravatar';
+    let url = '/api/avatars/upload';
 
     if (!power_user.never_resize_avatars) {
         $('#dialogue_popup').addClass('large_dialogue_popup wide_dialogue_popup');
@@ -5710,6 +5712,12 @@ async function uploadUserAvatar(e) {
         if (crop_data !== undefined) {
             url += `?crop=${encodeURIComponent(JSON.stringify(crop_data))}`;
         }
+    }
+
+    const rawFile = formData.get('avatar');
+    if (rawFile instanceof File){
+        const convertedFile = await ensureImageFormatSupported(rawFile);
+        formData.set('avatar', convertedFile);
     }
 
     jQuery.ajax({
@@ -5770,6 +5778,16 @@ async function doOnboarding(avatarId) {
     }
 }
 
+function reloadLoop() {
+    const MAX_RELOADS = 5;
+    let reloads = Number(sessionStorage.getItem('reloads') || 0);
+    if (reloads < MAX_RELOADS) {
+        reloads++;
+        sessionStorage.setItem('reloads', String(reloads));
+        window.location.reload();
+    }
+}
+
 //***************SETTINGS****************//
 ///////////////////////////////////////////
 async function getSettings() {
@@ -5781,7 +5799,8 @@ async function getSettings() {
     });
 
     if (!response.ok) {
-        toastr.error('Settings could not be loaded. Try reloading the page.');
+        reloadLoop();
+        toastr.error('Settings could not be loaded after multiple attempts. Please try again later.');
         throw new Error('Error getting settings');
     }
 
@@ -7200,8 +7219,15 @@ function addAlternateGreeting(template, greeting, index, getArray) {
 
 async function createOrEditCharacter(e) {
     $('#rm_info_avatar').html('');
-    var formData = new FormData($('#form_create').get(0));
+    const formData = new FormData($('#form_create').get(0));
     formData.set('fav', fav_ch_checked);
+
+    const rawFile = formData.get('avatar');
+    if (rawFile instanceof File){
+        const convertedFile = await ensureImageFormatSupported(rawFile);
+        formData.set('avatar', convertedFile);
+    }
+
     if ($('#form_create').attr('actiontype') == 'createcharacter') {
         if ($('#character_name_pole').val().length > 0) {
             if (is_group_generating || is_send_press) {
@@ -7407,6 +7433,9 @@ window['SillyTavern'].getContext = function () {
         writeExtensionField: writeExtensionField,
         getThumbnailUrl: getThumbnailUrl,
         selectCharacterById: selectCharacterById,
+        messageFormatting: messageFormatting,
+        shouldSendOnEnter: shouldSendOnEnter,
+        isMobile: isMobile,
         tags: tags,
         tagMap: tag_map,
         menuType: menu_type,
@@ -8421,8 +8450,7 @@ jQuery(async function () {
     $('#advanced_div').click(function () {
         if (!is_advanced_char_open) {
             is_advanced_char_open = true;
-            $('#character_popup').css('display', 'flex');
-            $('#character_popup').css('opacity', 0.0);
+            $('#character_popup').css({'display': 'flex', 'opacity': 0.0}).addClass('open');
             $('#character_popup').transition({
                 opacity: 1.0,
                 duration: animation_duration,
@@ -8430,7 +8458,7 @@ jQuery(async function () {
             });
         } else {
             is_advanced_char_open = false;
-            $('#character_popup').css('display', 'none');
+            $('#character_popup').css('display', 'none').removeClass('open');
         }
     });
 
@@ -9788,6 +9816,15 @@ jQuery(async function () {
         $(this).closest('.inline-drawer').find('.inline-drawer-content textarea.autoSetHeight').each(function () {
             resetScrollHeight($(this));
         });
+    });
+
+    $(document).on('click', '.inline-drawer-maximize', function () {
+        const icon = $(this).find('.inline-drawer-icon, .floating_panel_maximize');
+        icon.toggleClass('fa-window-maximize fa-window-restore');
+        const drawerContent = $(this).closest('.drawer-content');
+        drawerContent.toggleClass('maximized');
+        const drawerId = drawerContent.attr('id');
+        resetMovableStyles(drawerId);
     });
 
     $(document).on('click', '.mes .avatar', function () {

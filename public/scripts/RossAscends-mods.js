@@ -130,7 +130,7 @@ export function isMobile() {
     return mobileTypes.includes(parsedUA?.platform?.type);
 }
 
-function shouldSendOnEnter() {
+export function shouldSendOnEnter() {
     if (!power_user) {
         return false;
     }
@@ -662,9 +662,9 @@ export async function initMovingUI() {
         dragElement($('#left-nav-panel'));
         dragElement($('#right-nav-panel'));
         dragElement($('#WorldInfo'));
-        await delay(1000);
-        console.debug('loading AN draggable function');
         dragElement($('#floatingPrompt'));
+        dragElement($('#logprobsViewer'));
+        dragElement($('#cfgConfig'));
     }
 }
 
