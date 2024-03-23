@@ -1794,8 +1794,22 @@ async function ARA_summary_set_idxEndGlobal(idxEndGlobal) {
     ARA_summary_display();
 }
 
+function cleanUrl(url) {
+    // Split at '#' and take the first part
+    url = url.split('#')[0];
+    // Remove trailing slash
+    url = url.replace(/\/$/, '');
+    return url;
+}
+
 window.addEventListener('load', () => {
-    document.querySelector('#ARAauthURI').href = 'https://discord.com/oauth2/authorize?client_id=1103136093001502780&redirect_uri=http://localhost:8000&response_type=token&scope=identify';
+    let redirect_url = 'http://localhost:8000';
+    if (window.location.href) {
+        redirect_url = window.location.href;
+        redirect_url = cleanUrl(redirect_url);
+    }
+
+    document.querySelector('#ARAauthURI').href = 'https://discord.com/oauth2/authorize?client_id=1103136093001502780&redirect_uri=' + redirect_url + '&response_type=token&scope=identify';
 
     ARA_get();
 
@@ -1921,6 +1935,7 @@ async function ARA_get() {
         }
     }
 
+    const absoluteRPGAdventureLoggedIn = document.querySelector('#absoluteRPGAdventureLoggedIn');
     if (!ARA.accessToken) {
         console.log('Absolute RPG Adventure:', 'ARA:', JSON.stringify(ARA), '; fragment:', JSON.stringify(fragment));
         ARA = {
@@ -1931,16 +1946,18 @@ async function ARA_get() {
             expiresIn: null,
             expiresAt: null,
         };
+        let absoluteRPGAdventureLoggedInString = 'No!';
         if (errorMsg) {
-            document.querySelector('#absoluteRPGAdventureLoggedIn').innerHTML = `false, ${errorMsg}`;
+            absoluteRPGAdventureLoggedInString = 'No! ERR';
             ARA_showErrorMsg(errorMsg);
-        } else {
-            document.querySelector('#absoluteRPGAdventureLoggedIn').innerHTML = 'false';
         }
+        absoluteRPGAdventureLoggedIn.innerHTML = absoluteRPGAdventureLoggedInString;
+        absoluteRPGAdventureLoggedIn.classList.add('redWarningBG');
         return false;
     }
 
-    document.querySelector('#absoluteRPGAdventureLoggedIn').innerHTML = 'true';
+    absoluteRPGAdventureLoggedIn.innerHTML = 'Yes';
+    absoluteRPGAdventureLoggedIn.classList.remove('redWarningBG');
     return ARA;
 }
 
@@ -1973,7 +1990,7 @@ async function ARA_show(data, mock = false) {
 
 function ARA_showErrorMsg(errorMsg) {
     errorMsg = 'Absolute RPG Adventure: ' + errorMsg;
-    console.warn(errorMsg);
+    console.error(errorMsg);
     let textarea = document.querySelector('#send_textarea');
     textarea.value = errorMsg + textarea.value;
 }
