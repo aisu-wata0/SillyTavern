@@ -1833,10 +1833,6 @@ function cleanUrl(url) {
 
 window.addEventListener('load', () => {
     let redirect_url = 'http://localhost:8000';
-    if (window.location.href) {
-        redirect_url = window.location.href;
-        redirect_url = cleanUrl(redirect_url);
-    }
 
     document.querySelector('#ARAauthURI').href = 'https://discord.com/oauth2/authorize?client_id=1103136093001502780&redirect_uri=' + redirect_url + '&response_type=token&scope=identify';
 
