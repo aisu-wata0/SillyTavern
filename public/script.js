@@ -172,6 +172,7 @@ import {
     importTags,
     tag_filter_types,
     compareTagsForSort,
+    initTags,
 } from './scripts/tags.js';
 import {
     SECRET_KEYS,
@@ -412,6 +413,7 @@ export const event_types = {
     CHARACTER_FIRST_MESSAGE_SELECTED: 'character_first_message_selected',
     // TODO: Naming convention is inconsistent with other events
     CHARACTER_DELETED: 'characterDeleted',
+    CHARACTER_DUPLICATED: 'character_duplicated',
 };
 
 export const eventSource = new EventEmitter();
@@ -495,6 +497,9 @@ const durationSaveEdit = 1000;
 const saveSettingsDebounced = debounce(() => saveSettings(), durationSaveEdit);
 export const saveCharacterDebounced = debounce(() => $('#create_button').trigger('click'), durationSaveEdit);
 
+/**
+ * @enum {string} System message types
+ */
 const system_message_types = {
     HELP: 'help',
     WELCOME: 'welcome',
@@ -511,10 +516,22 @@ const system_message_types = {
     MACROS: 'macros',
 };
 
+/**
+ * @enum {number} Extension prompt types
+ */
 const extension_prompt_types = {
     IN_PROMPT: 0,
     IN_CHAT: 1,
     BEFORE_PROMPT: 2,
+};
+
+/**
+ * @enum {number} Extension prompt roles
+ */
+export const extension_prompt_roles = {
+    SYSTEM: 0,
+    USER: 1,
+    ASSISTANT: 2,
 };
 
 export const MAX_INJECTION_DEPTH = 1000;
@@ -849,6 +866,7 @@ async function firstLoadInit() {
     getSystemMessages();
     sendSystemMessage(system_message_types.WELCOME);
     initLocales();
+    initTags();
     await getUserAvatars(true, user_avatar);
     await getCharacters();
     await getBackgrounds();
@@ -1222,7 +1240,7 @@ function getCharacterBlock(item, id) {
     const template = $('#character_template .character_select').clone();
     template.attr({ 'chid': id, 'id': `CharID${id}` });
     template.find('img').attr('src', this_avatar).attr('alt', item.name);
-    template.find('.avatar').attr('title', `[Character] ${item.name}`);
+    template.find('.avatar').attr('title', `[Character] ${item.name}\nFile: ${item.avatar}`);
     template.find('.ch_name').text(item.name).attr('title', `[Character] ${item.name}`);
     if (power_user.show_card_avatar_urls) {
         template.find('.ch_avatar_url').text(item.avatar);
@@ -1840,6 +1858,7 @@ function insertSVGIcon(mes, extra) {
 
 function getMessageFromTemplate({
     mesId,
+    swipeId,
     characterName,
     isUser,
     avatarImg,
@@ -1857,6 +1876,7 @@ function getMessageFromTemplate({
     const mes = messageTemplate.clone();
     mes.attr({
         'mesid': mesId,
+        'swipeid': swipeId,
         'ch_name': characterName,
         'is_user': isUser,
         'is_system': !!isSystem,
@@ -2003,6 +2023,7 @@ function addOneMessage(mes, { type = 'normal', insertAfter = null, scroll = true
 
     let params = {
         mesId: forceId ?? chat.length - 1,
+        swipeId: mes.swipe_id ?? 0,
         characterName: mes.name,
         isUser: mes.is_user,
         avatarImg: avatarImg,
@@ -2013,7 +2034,7 @@ function addOneMessage(mes, { type = 'normal', insertAfter = null, scroll = true
         forceAvatar: mes.force_avatar,
         timestamp: timestamp,
         extra: mes.extra,
-        tokenCount: mes.extra?.token_count,
+        tokenCount: mes.extra?.token_count ?? 0,
         ...formatGenerationTimer(mes.gen_started, mes.gen_finished, mes.extra?.token_count),
     };
 
@@ -2439,7 +2460,7 @@ function addPersonaDescriptionExtensionPrompt() {
             ? `${power_user.persona_description}\n${originalAN}`
             : `${originalAN}\n${power_user.persona_description}`;
 
-        setExtensionPrompt(NOTE_MODULE_NAME, ANWithDesc, chat_metadata[metadata_keys.position], chat_metadata[metadata_keys.depth], extension_settings.note.allowWIScan);
+        setExtensionPrompt(NOTE_MODULE_NAME, ANWithDesc, chat_metadata[metadata_keys.position], chat_metadata[metadata_keys.depth], extension_settings.note.allowWIScan, chat_metadata[metadata_keys.role]);
     }
 }
 
@@ -2462,17 +2483,29 @@ function getExtensionPromptByName(moduleName) {
     }
 }
 
-function getExtensionPrompt(position = 0, depth = undefined, separator = '\n') {
+/**
+ * Returns the extension prompt for the given position, depth, and role.
+ * If multiple prompts are found, they are joined with a separator.
+ * @param {number} [position] Position of the prompt
+ * @param {number} [depth] Depth of the prompt
+ * @param {string} [separator] Separator for joining multiple prompts
+ * @param {number} [role] Role of the prompt
+ * @param {boolean} [wrap] Wrap start and end with a separator
+ * @returns {string} Extension prompt
+ */
+function getExtensionPrompt(position = extension_prompt_types.IN_PROMPT, depth = undefined, separator = '\n', role = undefined, wrap = true) {
     let extension_prompt = Object.keys(extension_prompts)
         .sort()
         .map((x) => extension_prompts[x])
-        .filter(x => x.position == position && x.value && (depth === undefined || x.depth == depth))
+        .filter(x => x.position == position && x.value)
+        .filter(x => depth === undefined || x.depth === undefined || x.depth === depth)
+        .filter(x => role === undefined || x.role === undefined || x.role === role)
         .map(x => x.value.trim())
         .join(separator);
-    if (extension_prompt.length && !extension_prompt.startsWith(separator)) {
+    if (wrap && extension_prompt.length && !extension_prompt.startsWith(separator)) {
         extension_prompt = separator + extension_prompt;
     }
-    if (extension_prompt.length && !extension_prompt.endsWith(separator)) {
+    if (wrap && extension_prompt.length && !extension_prompt.endsWith(separator)) {
         extension_prompt = extension_prompt + separator;
     }
     if (extension_prompt.length) {
@@ -2700,9 +2733,7 @@ class StreamingProcessor {
         const continueMsg = this.type === 'continue' ? this.messageAlreadyGenerated : undefined;
         saveLogprobsForActiveMessage(this.messageLogprobs.filter(Boolean), continueMsg);
         await saveChatConditional();
-        activateSendButtons();
-        showSwipeButtons();
-        setGenerationProgress(0);
+        unblockGeneration();
         generatedPromptCache = '';
 
         //console.log("Generated text size:", text.length, text)
@@ -2745,11 +2776,8 @@ class StreamingProcessor {
         this.isStopped = true;
 
         this.hideMessageButtons(this.messageId);
-        $('#send_textarea').removeAttr('disabled');
-        is_send_press = false;
-        activateSendButtons();
-        setGenerationProgress(0);
-        showSwipeButtons();
+        generatedPromptCache = '';
+        unblockGeneration();
     }
 
     setFirstSwipe(messageId) {
@@ -3160,6 +3188,21 @@ async function Generate(type, { automatic_trigger, force_name2, quiet_prompt, qu
         console.debug('Skipping extension interceptors for dry run');
     }
 
+    // Adjust token limit for Horde
+    let adjustedParams;
+    if (main_api == 'koboldhorde' && (horde_settings.auto_adjust_context_length || horde_settings.auto_adjust_response_length)) {
+        try {
+            adjustedParams = await adjustHordeGenerationParams(max_context, amount_gen);
+        }
+        catch {
+            unblockGeneration();
+            return Promise.resolve();
+        }
+        if (horde_settings.auto_adjust_context_length) {
+            this_max_context = (adjustedParams.maxContextLength - adjustedParams.maxLength);
+        }
+    }
+
     console.log(`Core/all messages: ${coreChat.length}/${chat.length}`);
 
     // kingbri MARK: - Make sure the prompt bias isn't the same as the user bias
@@ -3172,6 +3215,33 @@ async function Generate(type, { automatic_trigger, force_name2, quiet_prompt, qu
     }
 
     //////////////////////////////////
+    // Extension added strings
+    // Set non-WI AN
+    setFloatingPrompt();
+    // Add WI to prompt (and also inject WI to AN value via hijack)
+
+    const chatForWI = coreChat.map(x => `${x.name}: ${x.mes}`).reverse();
+    let { worldInfoString, worldInfoBefore, worldInfoAfter, worldInfoDepth } = await getWorldInfoPrompt(chatForWI, this_max_context, dryRun);
+
+    if (skipWIAN !== true) {
+        console.log('skipWIAN not active, adding WIAN');
+        // Add all depth WI entries to prompt
+        flushWIDepthInjections();
+        if (Array.isArray(worldInfoDepth)) {
+            worldInfoDepth.forEach((e) => {
+                const joinedEntries = e.entries.join('\n');
+                setExtensionPrompt(`customDepthWI-${e.depth}-${e.role}`, joinedEntries, extension_prompt_types.IN_CHAT, e.depth, false, e.role);
+            });
+        }
+    } else {
+        console.log('skipping WIAN');
+    }
+
+    // Inject all Depth prompts. Chat Completion does it separately
+    let injectedIndices = [];
+    if (main_api !== 'openai') {
+        injectedIndices = doChatInject(coreChat, isContinue);
+    }
 
     // Insert character jailbreak as the last user message (if exists, allowed, preferred, and not using Chat Completion)
     if (power_user.context.allow_jailbreak && power_user.prefer_character_jailbreak && main_api !== 'openai' && jailbreak) {
@@ -3190,10 +3260,13 @@ async function Generate(type, { automatic_trigger, force_name2, quiet_prompt, qu
     let chat2 = [];
     let continue_mag = '';
     for (let i = coreChat.length - 1, j = 0; i >= 0; i--, j++) {
-        // For OpenAI it's only used in WI
-        if (main_api == 'openai' && (!world_info || world_info.length === 0)) {
-            console.debug('No WI, skipping chat2 for OAI');
-            break;
+        if (main_api == 'openai') {
+            chat2[i] = coreChat[j].mes;
+            if (i === 0 && isContinue) {
+                chat2[i] = chat2[i].slice(0, chat2[i].lastIndexOf(coreChat[j].mes) + coreChat[j].mes.length);
+                continue_mag = coreChat[j].mes;
+            }
+            continue;
         }
 
         chat2[i] = formatMessageHistoryItem(coreChat[j], isInstruct, false);
@@ -3215,49 +3288,12 @@ async function Generate(type, { automatic_trigger, force_name2, quiet_prompt, qu
         }
     }
 
-    // Adjust token limit for Horde
-    let adjustedParams;
-    if (main_api == 'koboldhorde' && (horde_settings.auto_adjust_context_length || horde_settings.auto_adjust_response_length)) {
-        try {
-            adjustedParams = await adjustHordeGenerationParams(max_context, amount_gen);
-        }
-        catch {
-            unblockGeneration();
-            return Promise.resolve();
-        }
-        if (horde_settings.auto_adjust_context_length) {
-            this_max_context = (adjustedParams.maxContextLength - adjustedParams.maxLength);
-        }
-    }
-
-    // Extension added strings
-    // Set non-WI AN
-    setFloatingPrompt();
-    // Add WI to prompt (and also inject WI to AN value via hijack)
-
-    let { worldInfoString, worldInfoBefore, worldInfoAfter, worldInfoDepth } = await getWorldInfoPrompt(chat2, this_max_context, dryRun);
-
-    if (skipWIAN !== true) {
-        console.log('skipWIAN not active, adding WIAN');
-        // Add all depth WI entries to prompt
-        flushWIDepthInjections();
-        if (Array.isArray(worldInfoDepth)) {
-            worldInfoDepth.forEach((e) => {
-                const joinedEntries = e.entries.join('\n');
-                setExtensionPrompt(`customDepthWI-${e.depth}`, joinedEntries, extension_prompt_types.IN_CHAT, e.depth);
-            });
-        }
-    } else {
-        console.log('skipping WIAN');
-    }
-
     // Add persona description to prompt
     addPersonaDescriptionExtensionPrompt();
     // Call combined AN into Generate
     let allAnchors = getAllExtensionPrompts();
     const beforeScenarioAnchor = getExtensionPrompt(extension_prompt_types.BEFORE_PROMPT).trimStart();
     const afterScenarioAnchor = getExtensionPrompt(extension_prompt_types.IN_PROMPT);
-    let zeroDepthAnchor = getExtensionPrompt(extension_prompt_types.IN_CHAT, 0, ' ');
 
     const storyStringParams = {
         description: description,
@@ -3371,8 +3407,8 @@ async function Generate(type, { automatic_trigger, force_name2, quiet_prompt, qu
         // Coping mechanism for OAI spacing
         const isForceInstruct = isOpenRouterWithInstruct();
         if (main_api === 'openai' && !isForceInstruct && !cyclePrompt.endsWith(' ')) {
-            cyclePrompt += ' ';
-            continue_mag += ' ';
+            cyclePrompt += oai_settings.continue_postfix;
+            continue_mag += oai_settings.continue_postfix;
         }
         message_already_generated = continue_mag;
     }
@@ -3496,7 +3532,7 @@ async function Generate(type, { automatic_trigger, force_name2, quiet_prompt, qu
         }
 
         // Add a space if prompt cache doesn't start with one
-        if (!/^\s/.test(promptCache) && !isInstruct && !isContinue) {
+        if (!/^\s/.test(promptCache) && !isInstruct) {
             promptCache = ' ' + promptCache;
         }
 
@@ -3560,40 +3596,6 @@ async function Generate(type, { automatic_trigger, force_name2, quiet_prompt, qu
         // Deep clone
         let finalMesSend = structuredClone(mesSend);
 
-        // TODO: Rewrite getExtensionPrompt to not require multiple for loops
-        // Set all extension prompts where insertion depth > mesSend length
-        if (finalMesSend.length) {
-            for (let upperDepth = MAX_INJECTION_DEPTH; upperDepth >= finalMesSend.length; upperDepth--) {
-                const upperAnchor = getExtensionPrompt(extension_prompt_types.IN_CHAT, upperDepth);
-                if (upperAnchor && upperAnchor.length) {
-                    finalMesSend[0].extensionPrompts.push(upperAnchor);
-                }
-            }
-        }
-
-        finalMesSend.forEach((mesItem, index) => {
-            if (index === 0) {
-                return;
-            }
-
-            const anchorDepth = Math.abs(index - finalMesSend.length);
-            // NOTE: Depth injected here!
-            const extensionAnchor = getExtensionPrompt(extension_prompt_types.IN_CHAT, anchorDepth);
-
-            if (anchorDepth >= 0 && extensionAnchor && extensionAnchor.length) {
-                mesItem.extensionPrompts.push(extensionAnchor);
-            }
-        });
-
-        // TODO: Move zero-depth anchor append to work like CFG and bias appends
-        if (zeroDepthAnchor?.length && !isContinue) {
-            console.debug(/\s/.test(finalMesSend[finalMesSend.length - 1].message.slice(-1)));
-            finalMesSend[finalMesSend.length - 1].message +=
-                /\s/.test(finalMesSend[finalMesSend.length - 1].message.slice(-1))
-                    ? zeroDepthAnchor
-                    : `${zeroDepthAnchor}`;
-        }
-
         let cfgPrompt = {};
         if (cfgGuidanceScale && cfgGuidanceScale?.value !== 1) {
             cfgPrompt = getCfgPrompt(cfgGuidanceScale, isNegative);
@@ -3655,6 +3657,10 @@ async function Generate(type, { automatic_trigger, force_name2, quiet_prompt, qu
 
             return combinedPrompt;
         };
+
+        finalMesSend.forEach((item, i) => {
+            item.injected = Array.isArray(injectedIndices) && injectedIndices.includes(i);
+        });
 
         let data = {
             api: main_api,
@@ -3962,11 +3968,71 @@ async function Generate(type, { automatic_trigger, force_name2, quiet_prompt, qu
             toastr.error(exception.error.message, 'Error', { timeOut: 10000, extendedTimeOut: 20000 });
         }
 
+        generatedPromptCache = '';
+
         unblockGeneration();
         console.log(exception);
         streamingProcessor = null;
         throw exception;
     }
+}
+
+/**
+ * Injects extension prompts into chat messages.
+ * @param {object[]} messages Array of chat messages
+ * @param {boolean} isContinue Whether the generation is a continuation. If true, the extension prompts of depth 0 are injected at position 1.
+ * @returns {number[]} Array of indices where the extension prompts were injected
+ */
+function doChatInject(messages, isContinue) {
+    const injectedIndices = [];
+    let totalInsertedMessages = 0;
+    messages.reverse();
+
+    for (let i = 0; i <= MAX_INJECTION_DEPTH; i++) {
+        // Order of priority (most important go lower)
+        const roles = [extension_prompt_roles.SYSTEM, extension_prompt_roles.USER, extension_prompt_roles.ASSISTANT];
+        const names = {
+            [extension_prompt_roles.SYSTEM]: '',
+            [extension_prompt_roles.USER]: name1,
+            [extension_prompt_roles.ASSISTANT]: name2,
+        };
+        const roleMessages = [];
+        const separator = '\n';
+        const wrap = false;
+
+        for (const role of roles) {
+            const extensionPrompt = String(getExtensionPrompt(extension_prompt_types.IN_CHAT, i, separator, role, wrap)).trimStart();
+            const isNarrator = role === extension_prompt_roles.SYSTEM;
+            const isUser = role === extension_prompt_roles.USER;
+            const name = names[role];
+
+            if (extensionPrompt) {
+                roleMessages.push({
+                    name: name,
+                    is_user: isUser,
+                    mes: extensionPrompt,
+                    extra: {
+                        type: isNarrator ? system_message_types.NARRATOR : null,
+                    },
+                });
+            }
+        }
+
+        if (roleMessages.length) {
+            const depth = isContinue && i === 0 ? 1 : i;
+            const injectIdx = depth + totalInsertedMessages;
+            messages.splice(injectIdx, 0, ...roleMessages);
+            totalInsertedMessages += roleMessages.length;
+            injectedIndices.push(...Array.from({ length: roleMessages.length }, (_, i) => injectIdx + i));
+        }
+    }
+
+    for (let i = 0; i < injectedIndices.length; i++) {
+        injectedIndices[i] = messages.length - injectedIndices[i] - 1;
+    }
+
+    messages.reverse();
+    return injectedIndices;
 }
 
 function flushWIDepthInjections() {
@@ -4115,9 +4181,10 @@ export function removeMacros(str) {
  * @param {string} messageText Message text.
  * @param {string} messageBias Message bias.
  * @param {number} [insertAt] Optional index to insert the message at.
+ * @params {boolean} [compact] Send as a compact display message.
  * @returns {Promise<void>} A promise that resolves when the message is inserted.
  */
-export async function sendMessageAsUser(messageText, messageBias, insertAt = null) {
+export async function sendMessageAsUser(messageText, messageBias, insertAt = null, compact = false) {
     messageText = getRegexedString(messageText, regex_placement.USER_INPUT);
 
     const message = {
@@ -4126,7 +4193,9 @@ export async function sendMessageAsUser(messageText, messageBias, insertAt = nul
         is_system: false,
         send_date: getMessageTimeStamp(),
         mes: substituteParams(messageText),
-        extra: {},
+        extra: {
+            isSmallSys: compact,
+        },
     };
 
     if (power_user.message_token_count_enabled) {
@@ -4229,25 +4298,6 @@ function addChatsSeparator(mesSendString) {
     }
 }
 
-// There's a TODO related to zero-depth anchors; not removing this function until that's resolved
-// eslint-disable-next-line no-unused-vars
-function appendZeroDepthAnchor(force_name2, zeroDepthAnchor, finalPrompt) {
-    const trimBothEnds = !force_name2;
-    let trimmedPrompt = (trimBothEnds ? zeroDepthAnchor.trim() : zeroDepthAnchor.trimEnd());
-
-    if (trimBothEnds && !finalPrompt.endsWith('\n')) {
-        finalPrompt += '\n';
-    }
-
-    finalPrompt += trimmedPrompt;
-
-    if (force_name2) {
-        finalPrompt += ' ';
-    }
-
-    return finalPrompt;
-}
-
 async function DupeChar() {
     if (!this_chid) {
         toastr.warning('You must first select a character to duplicate!');
@@ -4273,6 +4323,8 @@ async function DupeChar() {
     });
     if (response.ok) {
         toastr.success('Character Duplicated');
+        const data = await response.json();
+        await eventSource.emit(event_types.CHARACTER_DUPLICATED, { oldAvatar: body.avatar_url, newAvatar: data.path });
         getCharacters();
     }
 }
@@ -4531,6 +4583,7 @@ function parseAndSaveLogprobs(data, continueFrom) {
                     logprobs = data?.completion_probabilities?.map(x => parseTextgenLogprobs(x.content, [x])) || null;
                 } break;
                 case textgen_types.APHRODITE:
+                case textgen_types.MANCER:
                 case textgen_types.TABBY: {
                     logprobs = parseTabbyLogprobs(data) || null;
                 } break;
@@ -4585,7 +4638,7 @@ function extractMultiSwipes(data, type) {
         return swipes;
     }
 
-    if (main_api === 'openai' || (main_api === 'textgenerationwebui' && textgen_settings.type === textgen_types.APHRODITE)) {
+    if (main_api === 'openai' || (main_api === 'textgenerationwebui' && [MANCER, APHRODITE].includes(textgen_settings.type))) {
         if (!Array.isArray(data.choices)) {
             return swipes;
         }
@@ -5625,7 +5678,7 @@ export async function getUserAvatars(doRender = true, openPageAt = '') {
 
 function highlightSelectedAvatar() {
     $('#user_avatar_block .avatar-container').removeClass('selected');
-    $(`#user_avatar_block .avatar-container[imgfile='${user_avatar}']`).addClass('selected');
+    $(`#user_avatar_block .avatar-container[imgfile="${user_avatar}"]`).addClass('selected');
 }
 
 /**
@@ -5690,6 +5743,12 @@ export function setUserAvatar(imgfile) {
     $('.zoomed_avatar[forchar]').remove();
 }
 
+export function retriggerFirstMessageOnEmptyChat() {
+    if (this_chid >= 0 && !selected_group && chat.length === 1) {
+        $('#firstmessage_textarea').trigger('input');
+    }
+}
+
 async function uploadUserAvatar(e) {
     const file = e.target.files[0];
 
@@ -5715,7 +5774,7 @@ async function uploadUserAvatar(e) {
     }
 
     const rawFile = formData.get('avatar');
-    if (rawFile instanceof File){
+    if (rawFile instanceof File) {
         const convertedFile = await ensureImageFormatSupported(rawFile);
         formData.set('avatar', convertedFile);
     }
@@ -6656,10 +6715,17 @@ function select_rm_characters() {
  * @param {string} value Prompt injection value.
  * @param {number} position Insertion position. 0 is after story string, 1 is in-chat with custom depth.
  * @param {number} depth Insertion depth. 0 represets the last message in context. Expected values up to MAX_INJECTION_DEPTH.
+ * @param {number} role Extension prompt role. Defaults to SYSTEM.
  * @param {boolean} scan Should the prompt be included in the world info scan.
  */
-export function setExtensionPrompt(key, value, position, depth, scan = false) {
-    extension_prompts[key] = { value: String(value), position: Number(position), depth: Number(depth), scan: !!scan };
+export function setExtensionPrompt(key, value, position, depth, scan = false, role = extension_prompt_roles.SYSTEM) {
+    extension_prompts[key] = {
+        value: String(value),
+        position: Number(position),
+        depth: Number(depth),
+        scan: !!scan,
+        role: Number(role ?? extension_prompt_roles.SYSTEM),
+    };
 }
 
 /**
@@ -7223,7 +7289,7 @@ async function createOrEditCharacter(e) {
     formData.set('fav', fav_ch_checked);
 
     const rawFile = formData.get('avatar');
-    if (rawFile instanceof File){
+    if (rawFile instanceof File) {
         const convertedFile = await ensureImageFormatSupported(rawFile);
         formData.set('avatar', convertedFile);
     }
@@ -8417,9 +8483,7 @@ jQuery(async function () {
         setUserAvatar(imgfile);
 
         // force firstMes {{user}} update on persona switch
-        if (this_chid >= 0 && !selected_group && chat.length === 1) {
-            $('#firstmessage_textarea').trigger('input');
-        }
+        retriggerFirstMessageOnEmptyChat();
     });
     $(document).on('click', '#user_avatar_block .avatar_upload', function () {
         $('#avatar_upload_overwrite').val('');
@@ -8450,7 +8514,7 @@ jQuery(async function () {
     $('#advanced_div').click(function () {
         if (!is_advanced_char_open) {
             is_advanced_char_open = true;
-            $('#character_popup').css({'display': 'flex', 'opacity': 0.0}).addClass('open');
+            $('#character_popup').css({ 'display': 'flex', 'opacity': 0.0 }).addClass('open');
             $('#character_popup').transition({
                 opacity: 1.0,
                 duration: animation_duration,
@@ -8544,11 +8608,15 @@ jQuery(async function () {
             await clearChat();
             chat.length = 0;
 
-            chat_file_for_del = getCurrentChatDetails().sessionName;
-            const isDelChatCheckbox = document.getElementById('del_chat_checkbox').checked;
+            chat_file_for_del = getCurrentChatDetails()?.sessionName;
+            const isDelChatCheckbox = document.getElementById('del_chat_checkbox')?.checked;
+
+            // Make it easier to find in backups
+            if (isDelChatCheckbox) {
+                await saveChatConditional();
+            }
 
             if (selected_group) {
-                //Fix it; When you're creating a new group chat (but not when initially converting from the existing regular chat), the first greeting message doesn't automatically get translated.
                 await createNewGroupChat(selected_group);
                 if (isDelChatCheckbox) await deleteGroupChat(selected_group, chat_file_for_del);
             }
@@ -8611,14 +8679,13 @@ jQuery(async function () {
     $('#form_create').submit(createOrEditCharacter);
 
     $('#delete_button').on('click', function () {
-        popup_type = 'del_ch';
         callPopup(`
                 <h3>Delete the character?</h3>
                 <b>THIS IS PERMANENT!<br><br>
                 <label for="del_char_checkbox" class="checkbox_label justifyCenter">
                     <input type="checkbox" id="del_char_checkbox" />
-                    <span>Also delete the chat files</span>
-                </label><br></b>`,
+                    <small>Also delete the chat files</small>
+                </label><br></b>`, 'del_ch', '',
         );
     });
 
@@ -8926,7 +8993,7 @@ jQuery(async function () {
                     <label for="del_chat_checkbox" class="checkbox_label justifyCenter"
                     title="If necessary, you can later restore this chat file from the /backups folder">
                         <input type="checkbox" id="del_chat_checkbox" />
-                        <span>Also delete the current chat file</span>
+                        <small>Also delete the current chat file</small>
                     </label><br>
                 `, 'new_chat', '');
             }
@@ -9523,6 +9590,7 @@ jQuery(async function () {
         const userName = String($('#your_name').val()).trim();
         setUserName(userName);
         await updatePersonaNameIfExists(user_avatar, userName);
+        retriggerFirstMessageOnEmptyChat();
     });
 
     $('#sync_name_button').on('click', async function () {
