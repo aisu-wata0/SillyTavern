@@ -1387,7 +1387,7 @@ let ARA_local = {
 function ARA_summary_request() {
     let chat = ARA_local.chats[ARA_local.summary_current.chat_id];
     if (!chat) {
-        console.warn('No summary chat selected', 'summary_current', ARA_local.summary_current);
+        console.warn('No summary chat selected', 'summary_current', JSON.stringify(ARA_local.summary_current));
         const chat_ids = Object.keys(ARA_local.chats);
         if (chat_ids.length == 0) {
             console.warn('No summary chats ARA_local.chats =',ARA_local.chats);
@@ -1396,16 +1396,16 @@ function ARA_summary_request() {
         ARA_local.summary_current.chat_id = chat_ids[chat_ids.length - 1];
         chat = ARA_local.chats[ARA_local.summary_current.chat_id];
     }
-    if (!chat.summaries) {
-        console.warn('No summaries in chat', 'summary_current', ARA_local.summary_current, 'chat', chat);
+    if (isEmpty(chat.summaries)) {
+        console.warn('No summaries in chat', 'summary_current', JSON.stringify(ARA_local.summary_current), '\n', 'chat', JSON.stringify(chat));
         return null;
     }
     let summary = chat.summaries[ARA_local.summary_current.idxEndGlobal];
     if (!summary) {
-        console.warn('Summary idx selected doesn\'t exist', 'summary_current.idxEndGlobal =', ARA_local.summary_current.idxEndGlobal, 'summary_current', ARA_local.summary_current, 'summaries', chat.summaries);
+        console.warn('Summary idx selected doesn\'t exist', 'summary_current', JSON.stringify(ARA_local.summary_current), '\n', 'summaries', JSON.stringify(chat.summaries));
         const l = chat_summaries_keys(chat);
         if (l.length == 0) {
-            console.warn('Summaries empty', 'summary_current', ARA_local.summary_current, 'chat', chat);
+            console.warn('Summaries empty', 'summary_current', JSON.stringify(ARA_local.summary_current), 'chat', JSON.stringify(chat));
             return null;
         }
         // fix it, but return null
@@ -1568,11 +1568,11 @@ function ARA_summary_add(summary_request) {
         return false;
     }
     if (!summary_request.summary) {
-        console.log('Absolute RPG Adventure:', 'ARA_summary_add()', '! summary_request.summary');
+        console.warn('Absolute RPG Adventure:', 'ARA_summary_add()', '! summary_request.summary');
         return false;
     }
     if (!summary_request.chat_id) {
-        console.log('Absolute RPG Adventure:', 'ARA_summary_add()', '! summary_request.chat_id');
+        console.warn('Absolute RPG Adventure:', 'ARA_summary_add()', '! summary_request.chat_id');
         return false;
     }
     let chat_id = summary_request.chat_id;
@@ -1988,7 +1988,7 @@ async function ARA_get() {
 
 
 function ARA_showSheet(data) {
-    if (data.game.sheet && data.game.sheet.render && data.game.sheet.render.text) {
+    if (data.game?.sheet?.render?.text) {
         let sheet_text = data.game.sheet.render.text;
         const ARA_sheet_el = document.querySelector('#ARA-sheet');
         try {
@@ -2005,7 +2005,7 @@ function ARA_showSheet(data) {
 
 async function ARA_show(data, mock = false) {
     console.log('Absolute RPG Adventure:', 'ARA_show(): data', data);
-    if (data && data.game) {
+    if (data?.game) {
         if (!mock) {
             ARA_showSheet(data);
         }
@@ -2032,25 +2032,49 @@ async function ARA_generateSummary(signal) {
         console.error('Absolute RPG Adventure:', 'ARA_generateSummary(): No summary request');
         return null;
     }
-    const generate_url = '/generate_openai';
+    const generate_data = summary_request.summary.body;
+    const generate_url = '/api/backends/chat-completions/generate';
     const response = await fetch(generate_url, {
         method: 'POST',
-        body: JSON.stringify(summary_request.summary.body),
+        body: JSON.stringify(generate_data),
         headers: getRequestHeaders(),
-        signal,
+        signal: signal,
     });
 
-    let summary_output = await response.json();
-
-    checkQuotaError(summary_output);
-    if (summary_output.error) {
-        console.log('sleeping on summary_output.error =', JSON.stringify(summary_output.error));
-        await delay(2 * 1000);
-        throw new Error(JSON.stringify(summary_output));
+    if (!response.ok) {
+        tryParseStreamingError(response, await response.text());
+        throw new Error(`Got response status ${response.status}`);
     }
 
-    console.log('Absolute RPG Adventure:', 'generateSummary() return ', summary_output);
-    return summary_output;
+    let data = await response.json();
+
+    // checkQuotaError(data);
+    if (data.quota_error) {
+        throw new Error(JSON.stringify(data));
+    }
+
+    // checkModerationError(data);
+    const moderationError = data?.error?.message?.includes('requires moderation');
+    if (moderationError) {
+        const moderationReason = `Reasons: ${data?.error?.metadata?.reasons?.join(', ') ?? '(N/A)'}`;
+        const flaggedText = data?.error?.metadata?.flagged_input ?? '(N/A)';
+
+        data = {
+            moderationReason,
+            flaggedText,
+            ...data,
+        }
+        throw new Error(JSON.stringify(data));
+    }
+
+    if (data.error) {
+        console.warn('sleeping on summary_output.error =', JSON.stringify(data.error));
+        await delay(2 * 1000);
+        throw new Error(JSON.stringify(data));
+    }
+
+    console.log('Absolute RPG Adventure:', 'generateSummary() return ', data);
+    return data;
 }
 
 function ARA_requestConfig() {
@@ -2817,7 +2841,7 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
             }
             if (power_user.absoluteRPGAdventure) {
                 const data = await ARA_getResult(text, chat_id, generate_data_prev, signal);
-                if (data && data.game && data.game.lastReply) {
+                if (data?.game?.lastReply) {
                     yield { text: data.game.lastReply, swipes: swipes };
                 }
             }
