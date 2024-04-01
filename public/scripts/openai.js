@@ -1387,7 +1387,7 @@ let ARA_local = {
 function ARA_summary_request() {
     let chat = ARA_local.chats[ARA_local.summary_current.chat_id];
     if (!chat) {
-        console.warn('No summary chat selected', 'summary_current', JSON.stringify(ARA_local.summary_current));
+        console.warn('No summary chat selected', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)));
         const chat_ids = Object.keys(ARA_local.chats);
         if (chat_ids.length == 0) {
             console.warn('No summary chats ARA_local.chats =',ARA_local.chats);
@@ -1397,15 +1397,15 @@ function ARA_summary_request() {
         chat = ARA_local.chats[ARA_local.summary_current.chat_id];
     }
     if (isEmpty(chat.summaries)) {
-        console.warn('No summaries in chat', 'summary_current', JSON.stringify(ARA_local.summary_current), '\n', 'chat', JSON.stringify(chat));
+        console.warn('No summaries in chat', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)), '\n', 'chat', JSON.parse(JSON.stringify(chat)));
         return null;
     }
     let summary = chat.summaries[ARA_local.summary_current.idxEndGlobal];
     if (!summary) {
-        console.warn('Summary idx selected doesn\'t exist', 'summary_current', JSON.stringify(ARA_local.summary_current), '\n', 'summaries', JSON.stringify(chat.summaries));
+        console.warn('Summary idx selected doesn\'t exist', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)), '\n', 'summaries', JSON.parse(JSON.stringify(chat.summaries)));
         const l = chat_summaries_keys(chat);
         if (l.length == 0) {
-            console.warn('Summaries empty', 'summary_current', JSON.stringify(ARA_local.summary_current), 'chat', JSON.stringify(chat));
+            console.warn('Summaries empty', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)), 'chat', JSON.parse(JSON.stringify(chat)));
             return null;
         }
         // fix it, but return null
@@ -1579,7 +1579,7 @@ function ARA_summary_add(summary_request) {
     let chat = ARA_local.chats[chat_id];
     let idxEndGlobal = String(summary_request.summary.idxEndGlobal);
     if (chat.summaries[idxEndGlobal]) {
-        console.warn('Absolute RPG Adventure:', 'ARA_summary_add()', 'Existing summary request', JSON.parse(JSON.stringify(chat.summaries[idxEndGlobal])), '\n overwrite', chat.summaries[idxEndGlobal]);
+        console.warn('Absolute RPG Adventure:', 'ARA_summary_add()', 'Existing summary request', JSON.parse(JSON.stringify(chat.summaries[idxEndGlobal])), '\n overwrite', summary_request);
     }
     chat.summaries[idxEndGlobal] = summary_request;
 
