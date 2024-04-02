@@ -1398,25 +1398,25 @@ let ARA_local = {
 function ARA_summary_request() {
     let chat = ARA_local.chats[ARA_local.summary_current.chat_id];
     if (!chat) {
-        console.warn('No summary chat selected', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)));
+        console.warn('Absolute RPG Adventure:', 'No summary chat selected', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)));
         const chat_ids = Object.keys(ARA_local.chats);
         if (chat_ids.length == 0) {
-            console.warn('No summary chats ARA_local.chats =',ARA_local.chats);
+            console.warn('Absolute RPG Adventure:', 'No summary chats ARA_local.chats =',ARA_local.chats);
             return null;
         }
         ARA_local.summary_current.chat_id = chat_ids[chat_ids.length - 1];
         chat = ARA_local.chats[ARA_local.summary_current.chat_id];
     }
     if (isEmpty(chat.summaries)) {
-        console.warn('No summaries in chat', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)), '\n', 'chat', JSON.parse(JSON.stringify(chat)));
+        console.warn('Absolute RPG Adventure:', 'No summaries in chat', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)), '\n', 'chat', JSON.parse(JSON.stringify(chat)));
         return null;
     }
     let summary = chat.summaries[ARA_local.summary_current.idxEndGlobal];
     if (!summary) {
-        console.warn('Summary idx selected doesn\'t exist', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)), '\n', 'summaries', JSON.parse(JSON.stringify(chat.summaries)));
+        console.warn('Absolute RPG Adventure:', 'Summary idx selected doesn\'t exist', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)), '\n', 'summaries', JSON.parse(JSON.stringify(chat.summaries)));
         const l = chat_summaries_keys(chat);
         if (l.length == 0) {
-            console.warn('Summaries empty', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)), 'chat', JSON.parse(JSON.stringify(chat)));
+            console.warn('Absolute RPG Adventure:', 'Summaries empty', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)), 'chat', JSON.parse(JSON.stringify(chat)));
             return null;
         }
         // fix it, but return null
@@ -1450,8 +1450,8 @@ async function ARA_summary_update(data) {
     let chat = ARA_local.chats[chat_id];
     if (data.game.summaries) {
         const summaries = ARA_summaries_flatten_to_last(data.game.summaries);
-        console.log('Absolute RPG Adventure:', 'ARA_summary_update()', 'chat_id', chat_id, 'summaries', summaries);
-        console.log('Absolute RPG Adventure:', 'ARA_summary_update()', 'chat', JSON.parse(JSON.stringify(chat)));
+        console.info('Absolute RPG Adventure:', 'ARA_summary_update()', 'chat_id', chat_id, 'summaries', summaries);
+        console.info('Absolute RPG Adventure:', 'ARA_summary_update()', 'chat', JSON.parse(JSON.stringify(chat)));
         if (!chat.summaries) {
             chat.summaries = {};
         }
@@ -1494,11 +1494,11 @@ async function ARA_summary_update(data) {
             }
         }
         for (const idx of removed_summaries) {
-            console.log('Absolute RPG Adventure:', 'ARA_summary_update() summary removed (server sync)', idx, JSON.parse(JSON.stringify(chat.summaries[idx])));
+            console.info('Absolute RPG Adventure:', 'ARA_summary_update() summary removed (server sync)', idx, JSON.parse(JSON.stringify(chat.summaries[idx])));
             // Just don't delete! LOL
             // delete chat.summaries[idx]
         }
-        console.log('Absolute RPG Adventure:', 'ARA_summary_update()', 'chat', JSON.parse(JSON.stringify(chat)));
+        console.info('Absolute RPG Adventure:', 'ARA_summary_update()', 'chat', JSON.parse(JSON.stringify(chat)));
     }
     if (data.game.summary) {
         let idxEndGlobal = data.game.summary.idxEndGlobal;
@@ -1512,7 +1512,7 @@ async function ARA_summary_update(data) {
             idxEndGlobal: idxEndGlobal,
         };
     } else {
-        console.log('Absolute RPG Adventure:', 'ARA_summary_update()', 'No summary on reply');
+        console.info('Absolute RPG Adventure:', 'ARA_summary_update()', 'No summary on reply');
     }
     ARA_summary_display();
 }
@@ -1538,8 +1538,7 @@ function chat_summaries_keys(chat) {
 
 async function ARA_summary_display() {
     let summary_request = ARA_summary_request();
-    if (!summary_request){
-        console.warn('ARA_summary_display() if (!summary_request) {return}', '; ARA_local.summary_current =', ARA_local.summary_current);
+    if (!summary_request) {
         return null;
     }
     let chat_id = summary_request.chat_id;
@@ -1550,14 +1549,14 @@ async function ARA_summary_display() {
     let idxEndGlobal_list = chat_summaries_keys(chat);
     let idxEndGlobal_last = idxEndGlobal_list[idxEndGlobal_list.length - 1];
     if (!(idxEndGlobal in chat.summaries)) {
-        console.log('Absolute RPG Adventure:', ' summary idx not found on list; !idxEndGlobal_list.includes(idxEndGlobal);', idxEndGlobal_list, 'includes', idxEndGlobal, ' == false');
+        console.info('Absolute RPG Adventure:', ' summary idx not found on list; !idxEndGlobal_list.includes(idxEndGlobal);', idxEndGlobal_list, 'includes', idxEndGlobal, ' == false');
         ARA_local.summary_current.idxEndGlobal = idxEndGlobal_last;
         summary_request = ARA_summary_request();
         idxEndGlobal = String(summary_request.summary.idxEndGlobal);
     }
     setSelectOptions('ARA-summary-idxEndGlobal-select', idxEndGlobal_list, idxEndGlobal);
 
-    console.log('Absolute RPG Adventure:', '  summary_display', ARA_local.summary_current, summary_request, idxEndGlobal,idxEndGlobal_list);
+    console.info('Absolute RPG Adventure:', '  summary_display', ARA_local.summary_current, summary_request, idxEndGlobal,idxEndGlobal_list);
 
     document.querySelector('#ARA-summary_text').value = summary_request.summary.summary;
     document.querySelector('#ARA-summary-idxEndGlobal_last').innerHTML = `/${idxEndGlobal_last}`;
@@ -1598,8 +1597,8 @@ function ARA_summary_add(summary_request) {
         chat_id,
         idxEndGlobal,
     };
-    console.log('Absolute RPG Adventure:', 'ARA_summary_add()', 'summary_request', summary_request);
-    console.log('Absolute RPG Adventure:', 'ARA_summary_add()', 'ARA_local.summary_current', ARA_local.summary_current);
+    console.info('Absolute RPG Adventure:', 'ARA_summary_add()', 'summary_request', summary_request);
+    console.info('Absolute RPG Adventure:', 'ARA_summary_add()', 'ARA_local.summary_current', ARA_local.summary_current);
 
     ARA_summary_display();
     return true;
@@ -1726,7 +1725,7 @@ function ARA_configSetUI(config_text = null) {
     if (!config_text) {
         config_text = JSON.stringify(ARA_local.config, null, '  ');
     }
-    console.log('ARA', 'ARA_configSetUI()', 'config_text', { config_text });
+    console.info('Absolute RPG Adventure', 'ARA_configSetUI()', 'config_text', { config_text });
     const config_text_el = document.querySelector('#ARA-config_text');
     try {
         const config_text_code = `\`\`\`js\n${config_text}\n\`\`\``;
@@ -1753,7 +1752,7 @@ async function ARA_configEditText() {
 
     try {
         ARA_configSave(config_text);
-        console.log('Absolute RPG Adventure:', 'config set', ARA_local.config);
+        console.info('Absolute RPG Adventure:', 'config set', ARA_local.config);
         ARA_button_config_error.innerHTML = '; OK';
     } catch (error) {
         console.error('Absolute RPG Adventure:', error);
@@ -1795,7 +1794,7 @@ async function ARA_summaryEditText() {
         return;
     }
     const summary_text = document.querySelector('#ARA-summary_text').value;
-    console.log('Absolute RPG Adventure:', 'updating summary manually', summary_text);
+    console.info('Absolute RPG Adventure:', 'updating summary manually', summary_text);
 
     ARA_local.regeneratingSummary = true;
     $('#ARA_summary_send').css('display', 'none');
@@ -1821,7 +1820,7 @@ async function ARA_summary_set_chat_id(chat_id) {
         chat_id,
         idxEndGlobal,
     };
-    console.log('ARA: set summary_current =', ARA_local.summary_current, '; summaries_idxs', summaries_idxs);
+    console.info('Absolute RPG Adventure: set summary_current =', ARA_local.summary_current, '; summaries_idxs', summaries_idxs);
     ARA_summary_display();
 }
 
@@ -1866,7 +1865,7 @@ window.addEventListener('load', () => {
     // ## summary selects
     let summary_chat_id_select = document.querySelector('#ARA-summary-chat_id-select');
     summary_chat_id_select.onchange = () => {
-        console.log('Absolute RPG Adventure:', 'summary_chat_id_select.onchange()', summary_chat_id_select.value);
+        console.info('Absolute RPG Adventure:', 'summary_chat_id_select.onchange()', summary_chat_id_select.value);
         if (ARA_local.regeneratingSummary) {
             console.warn('Absolute RPG Adventure:', 'Tried to change summary while its generating');
             summary_chat_id_select.value = ARA_local.summary_current.chat_id;
@@ -1876,7 +1875,7 @@ window.addEventListener('load', () => {
     };
     let summary_idxEndGlobal_select = document.querySelector('#ARA-summary-idxEndGlobal-select');
     summary_idxEndGlobal_select.onchange = () => {
-        console.log('Absolute RPG Adventure:', 'summary_idxEndGlobal_select.onchange()', summary_idxEndGlobal_select.value);
+        console.info('Absolute RPG Adventure:', 'summary_idxEndGlobal_select.onchange()', summary_idxEndGlobal_select.value);
         if (ARA_local.regeneratingSummary) {
             console.warn('Absolute RPG Adventure:', 'Tried to change summary while its generating');
             summary_idxEndGlobal_select.value = ARA_local.summary_current.idxEndGlobal;
@@ -1946,7 +1945,7 @@ async function ARA_get() {
             const data = await response.json();
             ARA.id = data.id;
             localStorage.setItem('ARA.id', ARA.id);
-            console.log('Absolute RPG Adventure: Logged in with Discord', data);
+            console.info('Absolute RPG Adventure: Logged in with Discord', data);
         } catch (error) {
             console.error(error);
             console.error('Absolute RPG Adventure: Discord call to https://discord.com/api/users/@me failed');
@@ -1973,7 +1972,7 @@ async function ARA_get() {
 
     const absoluteRPGAdventureLoggedIn = document.querySelector('#absoluteRPGAdventureLoggedIn');
     if (!ARA.accessToken) {
-        console.log('Absolute RPG Adventure:', 'ARA:', JSON.stringify(ARA), '; fragment:', JSON.stringify(fragment));
+        console.info('Absolute RPG Adventure:', 'ARA:', JSON.stringify(ARA), '; fragment:', JSON.stringify(fragment));
         ARA = {
             ...ARA,
             id: null,
@@ -2015,7 +2014,7 @@ function ARA_showSheet(data) {
 }
 
 async function ARA_show(data, mock = false) {
-    console.log('Absolute RPG Adventure:', 'ARA_show(): data', data);
+    console.info('Absolute RPG Adventure:', 'ARA_show(): data', data);
     if (data?.game) {
         if (!mock) {
             ARA_showSheet(data);
@@ -2079,12 +2078,12 @@ async function ARA_generateSummary(signal) {
     }
 
     if (data.error) {
-        console.warn('sleeping on summary_output.error =', JSON.stringify(data.error));
+        console.warn('Absolute RPG Adventure:', 'sleeping on summary_output.error =', JSON.stringify(data.error));
         await delay(2 * 1000);
         throw new Error(JSON.stringify(data));
     }
 
-    console.log('Absolute RPG Adventure:', 'generateSummary() return ', data);
+    console.info('Absolute RPG Adventure:', 'generateSummary() return ', data);
     return data;
 }
 
@@ -2092,7 +2091,7 @@ function ARA_requestConfig() {
     const context_max_tokens = oai_settings.openai_max_context;
     ARA_local.context_max_tokens = context_max_tokens;
     const configDiff = objDiff(ARA_local.config, ARA_config_default);
-    console.log('ARA: configDiff:', configDiff);
+    console.info('Absolute RPG Adventure: configDiff:', configDiff);
     return {
         ...configDiff,
         context_max_tokens,
@@ -2101,7 +2100,7 @@ function ARA_requestConfig() {
 
 async function ARA_summary_req_update(summary_text, edit, mock, signal = null) {
     const summary_request = ARA_summary_request();
-    console.log('Absolute RPG Adventure:', 'ARA_summary_req_update() ARA_summary()=', summary_request);
+    console.info('Absolute RPG Adventure:', 'ARA_summary_req_update() ARA_summary()=', summary_request);
     if (!summary_request) {
         console.error('Absolute RPG Adventure:', 'ARA_summary_req_update() Error: null summary_request', summary_request);
     }
@@ -2127,7 +2126,7 @@ async function ARA_summary_req_update(summary_text, edit, mock, signal = null) {
         });
         // Get full response from server
         data = await summaryRes.json();
-        console.log('Absolute RPG Adventure:', 'ARA_summary_req_update() data=', data);
+        console.info('Absolute RPG Adventure:', 'ARA_summary_req_update() data=', data);
         if (data.game && (data.game.summaryAgain || data.game.error)) {
             // asking for another summary, this one failed somehow
             console.warn('Absolute RPG Adventure:', data.game.error);
@@ -2151,7 +2150,7 @@ async function ARA_summary_regenerate(mock = false, signal = null) {
     try {
         try {
             document.querySelector('#ARA-summary_title').innerHTML = 'Waiting for summary...';
-            console.log('Absolute RPG Adventure:', 'Generating summary', ARA_summary_request());
+            console.info('Absolute RPG Adventure:', 'Generating summary', ARA_summary_request());
             let summary_output = await ARA_generateSummary(signal);
             summary_text = summary_output.choices[0]['message']['content'];
             document.querySelector('#ARA-summary_title').innerHTML = summary_title_before;
@@ -2206,15 +2205,15 @@ async function ARA_prompt(generate_data, chat_id, signal) {
 }
 
 async function ARA_summaryIfRequested(game, mock = false, signal = null) {
-    console.log('Absolute RPG Adventure:', ' summaryIfRequested', game);
+    console.info('Absolute RPG Adventure:', ' summaryIfRequested', game);
     if (!game || !game.summary_request) {
-        console.log('Absolute RPG Adventure:', ' no game or game.summary_request', game);
+        console.info('Absolute RPG Adventure:', ' no game or game.summary_request', game);
         return null;
     }
     let data_s = null;
     let r = ARA_summary_add(game.summary_request);
     if (r && ARA_summary_request().summary.body) {
-        console.log('Absolute RPG Adventure:', 'Generating summary, per request...', ARA_summary_request());
+        console.info('Absolute RPG Adventure:', 'Generating summary, per request...', ARA_summary_request());
         ARA_local.summaryTriesLeft = ARA_local.config.summary.retryAttempts;
         ARA_local.summaryErrors = [];
         while (ARA_local.summaryTriesLeft) {
@@ -2231,7 +2230,7 @@ async function ARA_summaryIfRequested(game, mock = false, signal = null) {
                 ARA_local.summaryErrors.push(error);
                 const errorMsg = 'Absolute RPG Adventure: on Auto Summary: ' + error.stack.toString();
                 console.warn(errorMsg);
-                console.log('Absolute RPG Adventure: summaryTriesLeft', ARA_local.summaryTriesLeft);
+                console.info('Absolute RPG Adventure: summaryTriesLeft', ARA_local.summaryTriesLeft);
                 if (ARA_local.summaryTriesLeft <= 0) {
                     // check if ARA_local.summaryErrors contains error string 'failed to fit on context', print a custom message if so, else print the generic one in the line below
                     // Check if any error contains the string 'failed to fit on context'
@@ -2258,7 +2257,7 @@ async function ARA_summary_preemptive(game, signal = null) {
     if (!game || !game.promptPreemptive) {
         return;
     }
-    console.log('Absolute RPG Adventure:', 'summary_preemptive:', game.promptPreemptive.game);
+    console.info('Absolute RPG Adventure:', 'summary_preemptive:', game.promptPreemptive.game);
     let summary_loc_prev = JSON.parse(JSON.stringify(ARA_local.summary_current));
     let data_s = null;
     const mock = true;
@@ -2279,7 +2278,7 @@ async function ARA_summary_preemptive(game, signal = null) {
 }
 
 async function ARA_getResult(lastReply, chat_id, generate_data_prev, signal = null) {
-    console.log('Absolute RPG Adventure:', 'getResult()');
+    console.info('Absolute RPG Adventure:', 'getResult()');
     let r = await ARA_get();
     if (!r) {
         ARA_notLoggedIn();
