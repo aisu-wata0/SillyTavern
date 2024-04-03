@@ -1768,10 +1768,6 @@ function summaryUpdateCheck() {
         console.warn('Absolute RPG Adventure:', 'tried to update summary, but there\'s no summary request');
         return false;
     }
-    if (!ARA_local.context_max_tokens) {
-        console.warn('Absolute RPG Adventure:', 'tried to update summary, but context_max_tokens is not defined, do at least one prompt to set it');
-        return false;
-    }
     if (ARA_local.regeneratingSummary) {
         console.warn('Absolute RPG Adventure:', 'tried to update summary, but already regenerating');
         return false;
@@ -2090,14 +2086,14 @@ async function ARA_generateSummary(signal) {
 }
 
 function ARA_requestConfig() {
-    const userSettings = promptManager.serviceSettings;
+    // const userSettings = promptManager.serviceSettings;
 
     const configDiff = objDiff(ARA_local.config, ARA_config_default);
     console.info('Absolute RPG Adventure: configDiff:', configDiff);
     return {
         ...configDiff,
         oai_settings,
-        userSettings,
+        // userSettings,
     };
 }
 
