@@ -2090,13 +2090,14 @@ async function ARA_generateSummary(signal) {
 }
 
 function ARA_requestConfig() {
-    const context_max_tokens = oai_settings.openai_max_context;
-    ARA_local.context_max_tokens = context_max_tokens;
+    const userSettings = promptManager.serviceSettings;
+
     const configDiff = objDiff(ARA_local.config, ARA_config_default);
     console.info('Absolute RPG Adventure: configDiff:', configDiff);
     return {
         ...configDiff,
-        context_max_tokens,
+        oai_settings,
+        userSettings,
     };
 }
 
