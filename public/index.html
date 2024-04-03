@@ -1516,6 +1516,17 @@
                                             </div>
                                         </div>
                                     </div>
+                                    <div data-newbie-hidden id="json_schema_block" data-tg-type="tabby" class="wide100p">
+                                        <hr class="wide100p">
+                                        <h4 class="wide100p textAlignCenter"><span data-i18n="JSON Schema">JSON Schema</span>
+                                            <a href="https://json-schema.org/learn/getting-started-step-by-step" target="_blank">
+                                                <small>
+                                                    <div class="fa-solid fa-circle-question note-link-span"></div>
+                                                </small>
+                                            </a>
+                                        </h4>
+                                        <textarea id="tabby_json_schema" rows="4" class="text_pole textarea_compact monospace" data-i18n="[placeholder]Type in the desired JSON schema" placeholder="Type in the desired JSON schema"></textarea>
+                                    </div>
                                     <div data-newbie-hidden id="grammar_block_ooba" class="wide100p">
                                         <hr class="wide100p">
                                         <h4 class="wide100p textAlignCenter">
@@ -1942,10 +1953,6 @@
                             <div data-for="api_key_novel" class="neutral_warning" data-i18n="For privacy reasons, your API key will be hidden after you reload the page.">
                                 For privacy reasons, your API key will be hidden after you reload the page.
                             </div>
-                            <div class="flex-container">
-                                <div id="api_button_novel" class="api_button menu_button" type="submit" data-i18n="Connect">Connect</div>
-                                <div class="api_loading menu_button" data-i18n="Cancel">Cancel</div>
-                            </div>
                             <h4><span data-i18n="Novel AI Model">Novel AI Model</span>
                                 <a href="https://docs.sillytavern.app/usage/api-connections/novelai/#models" class="notes-link" target="_blank">
                                     <span class="fa-solid fa-circle-question note-link-span"></span>
@@ -1955,6 +1962,10 @@
                                 <option value="clio-v1">Clio</option>
                                 <option value="kayra-v1">Kayra</option>
                             </select>
+                            <div class="flex-container">
+                                <div id="api_button_novel" class="api_button menu_button" type="submit" data-i18n="Connect">Connect</div>
+                                <div class="api_loading menu_button" data-i18n="Cancel">Cancel</div>
+                            </div>
                         </form>
                         <div class="online_status">
                             <div class="online_status_indicator"></div>
@@ -2478,6 +2489,20 @@
                             </div>
                         </form>
                         <form id="openrouter_form" data-source="openrouter" action="javascript:void(null);" method="post" enctype="multipart/form-data">
+                            <h4 data-i18n="OpenRouter API Key">OpenRouter API Key</h4>
+                            <div>
+                                <small data-i18n="Click Authorize below or get the key from">
+                                    Click "Authorize" below or get the key from </small> <a target="_blank" href="https://openrouter.ai/keys/">OpenRouter</a>.
+                                <br>
+                                <a href="https://openrouter.ai/account" target="_blank" data-i18n="View Remaining Credits">View Remaining Credits</a>
+                            </div>
+                            <div class="flex-container">
+                                <input id="api_key_openrouter" name="api_key_openrouter" class="text_pole flex1 api_key_openrouter" maxlength="500" value="" type="text" autocomplete="off">
+                                <div title="Clear your API key" data-i18n="[title]Clear your API key" class="menu_button fa-solid fa-circle-xmark clear-api-key" data-key="api_key_openrouter"></div>
+                            </div>
+                            <div data-for="api_key_openrouter" class="neutral_warning">
+                                For privacy reasons, your API key will be hidden after you reload the page.
+                            </div>
                             <div>
                                 <h4 data-i18n="OpenRouter Model">OpenRouter Model</h4>
                                 <select id="model_openrouter_select">
@@ -2540,20 +2565,6 @@
                                         advanced formatting settings (except instruct System Prompt). If disabled, the prompt will be formatted by OpenRouter.
                                     </span>
                                 </div>
-                            </div>
-                            <h4 data-i18n="OpenRouter API Key">OpenRouter API Key</h4>
-                            <div>
-                                <small data-i18n="Click Authorize below or get the key from">
-                                    Click "Authorize" below or get the key from </small> <a target="_blank" href="https://openrouter.ai/keys/">OpenRouter</a>.
-                                <br>
-                                <a href="https://openrouter.ai/account" target="_blank" data-i18n="View Remaining Credits">View Remaining Credits</a>
-                            </div>
-                            <div class="flex-container">
-                                <input id="api_key_openrouter" name="api_key_openrouter" class="text_pole flex1 api_key_openrouter" maxlength="500" value="" type="text" autocomplete="off">
-                                <div title="Clear your API key" data-i18n="[title]Clear your API key" class="menu_button fa-solid fa-circle-xmark clear-api-key" data-key="api_key_openrouter"></div>
-                            </div>
-                            <div data-for="api_key_openrouter" class="neutral_warning">
-                                For privacy reasons, your API key will be hidden after you reload the page.
                             </div>
                         </form>
                         <form id="scale_form" data-source="scale" action="javascript:void(null);" method="post" enctype="multipart/form-data">
@@ -3607,6 +3618,24 @@
                                         </div>
                                     </div>
                                 </div>
+                                <label class="checkbox_label flexWrap" for="smooth_streaming">
+                                    <input id="smooth_streaming" type="checkbox" />
+                                    <div class="flex-container alignItemsBaseline">
+                                        <span data-i18n="Smooth Streaming">
+                                            Smooth Streaming
+                                        </span>
+                                        <i class="fa-solid fa-flask" title="Experimental feature. May not work for all backends."></i>
+                                    </div>
+                                    <div id="smooth_streaming_speed_control" class="flexBasis100p wide100p">
+                                        <small class="flex justifyCenter" data-i18n="Speed">Speed</small>
+                                        <input type="range" id="smooth_streaming_speed" name="smooth_streaming_speed" min="0" max="100" step="10" value="50">
+                                        <div class="slider_hint">
+                                            <span data-i18n="Slow">Slow</span>
+                                            <span data-i18n=""></span>
+                                            <span data-i18n="Slow">Fast</span>
+                                        </div>
+                                    </div>
+                                </label>
                             </div>
                         </div>
                     </div>
