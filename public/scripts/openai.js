@@ -1673,7 +1673,9 @@ function formatTextToHtml(text) {
         throw new Error('formatTextToHtml() has no converter');
     }
     const textHtml = converter.makeHtml(text);
-    const textHtml_ = `<div>\n${textHtml}\n</div>`;
+    let textHtml_ = `<div>\n${textHtml}\n</div>`;
+    // Substitute all ["<p>", "</p>", "<br>"] to ""
+    textHtml_ = textHtml_.replace(/<p>|<\/p>|<br>/gim, '');
     const messageElement = htmlToElement(textHtml_);
     return messageElement;
 }
