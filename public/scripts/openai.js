@@ -42,7 +42,7 @@ import {
     promptManagerDefaultPromptOrders,
 } from './PromptManager.js';
 
-import { getCustomStoppingStrings, persona_description_positions, power_user } from './power-user.js';
+import { forceCharacterEditorTokenize, getCustomStoppingStrings, persona_description_positions, power_user } from './power-user.js';
 import { SECRET_KEYS, secret_state, writeSecret } from './secrets.js';
 
 import { getEventSourceStream } from './sse-stream.js';
@@ -186,6 +186,11 @@ const continue_postfix_types = {
     DOUBLE_NEWLINE: '\n\n',
 };
 
+const custom_prompt_post_processing_types = {
+    NONE: '',
+    CLAUDE: 'claude',
+};
+
 const prefixMap = selected_group ? {
     assistant: '',
     user: '',
@@ -209,6 +214,7 @@ const default_settings = {
     top_a_openai: 1,
     repetition_penalty_openai: 1,
     stream_openai: false,
+    websearch_cohere: false,
     openai_max_context: max_4k,
     openai_max_tokens: 300,
     wrap_in_quotes: false,
@@ -255,6 +261,7 @@ const default_settings = {
     use_ai21_tokenizer: false,
     use_google_tokenizer: false,
     claude_use_sysprompt: false,
+    use_makersuite_sysprompt: true,
     use_alt_scale: false,
     squash_system_messages: false,
     image_inlining: false,
@@ -262,6 +269,7 @@ const default_settings = {
     continue_prefill: false,
     names_behavior: character_names_behavior.NONE,
     continue_postfix: continue_postfix_types.SPACE,
+    custom_prompt_post_processing: custom_prompt_post_processing_types.NONE,
     seed: -1,
     n: 1,
 };
@@ -278,6 +286,7 @@ const oai_settings = {
     top_a_openai: 1,
     repetition_penalty_openai: 1,
     stream_openai: false,
+    websearch_cohere: false,
     openai_max_context: max_4k,
     openai_max_tokens: 300,
     wrap_in_quotes: false,
@@ -324,6 +333,7 @@ const oai_settings = {
     use_ai21_tokenizer: false,
     use_google_tokenizer: false,
     claude_use_sysprompt: false,
+    use_makersuite_sysprompt: true,
     use_alt_scale: false,
     squash_system_messages: false,
     image_inlining: false,
@@ -331,6 +341,7 @@ const oai_settings = {
     continue_prefill: false,
     names_behavior: character_names_behavior.NONE,
     continue_postfix: continue_postfix_types.SPACE,
+    custom_prompt_post_processing: custom_prompt_post_processing_types.NONE,
     seed: -1,
     n: 1,
 };
@@ -431,15 +442,15 @@ function convertChatCompletionToInstruct(messages, type) {
     const exampleMessages = messages.filter(x => x.role === 'system' && (x.name === 'example_user' || x.name === 'example_assistant'));
 
     if (exampleMessages.length) {
-        examplesText = power_user.context.example_separator + '\n';
-        examplesText += exampleMessages.map(toString).join('\n');
-        examplesText = formatInstructModeExamples(examplesText, name1, name2);
+        const blockHeading = power_user.context.example_separator ? (substituteParams(power_user.context.example_separator) + '\n') : '';
+        const examplesArray = exampleMessages.map(m => '<START>\n' + toString(m));
+        examplesText = blockHeading + formatInstructModeExamples(examplesArray, name1, name2).join('');
     }
 
     const chatMessages = messages.slice(firstChatMessage);
 
     if (chatMessages.length) {
-        chatMessagesText = power_user.context.chat_start + '\n';
+        chatMessagesText = substituteParams(power_user.context.chat_start) + '\n';
 
         for (const message of chatMessages) {
             const name = getPrefix(message);
@@ -2774,6 +2785,7 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
         const stopStringsLimit = 3; // 5 - 2 (nameStopString and new_chat_prompt)
         generate_data['top_k'] = Number(oai_settings.top_k_openai);
         generate_data['stop'] = [nameStopString, substituteParams(oai_settings.new_chat_prompt), ...getCustomStoppingStrings(stopStringsLimit)];
+        generate_data['use_makersuite_sysprompt'] = oai_settings.use_makersuite_sysprompt;
     }
 
     if (isAI21) {
@@ -2791,6 +2803,7 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
         generate_data['custom_include_body'] = oai_settings.custom_include_body;
         generate_data['custom_exclude_body'] = oai_settings.custom_exclude_body;
         generate_data['custom_include_headers'] = oai_settings.custom_include_headers;
+        generate_data['custom_prompt_post_processing'] = oai_settings.custom_prompt_post_processing;
     }
 
     if (isCohere) {
@@ -2801,6 +2814,7 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
         generate_data['frequency_penalty'] = Math.min(Math.max(Number(oai_settings.freq_pen_openai), 0), 1);
         generate_data['presence_penalty'] = Math.min(Math.max(Number(oai_settings.pres_pen_openai), 0), 1);
         generate_data['stop'] = getCustomStoppingStrings(5);
+        generate_data['websearch'] = oai_settings.websearch_cohere;
     }
 
     if ((isOAI || isOpenRouter || isMistral || isCustom || isCohere) && oai_settings.seed >= 0) {
@@ -3335,7 +3349,7 @@ export class ChatCompletion {
 
             const shouldSquash = (message) => {
                 return !excludeList.includes(message.identifier) && message.role === 'system' && !message.name;
-            }
+            };
 
             if (shouldSquash(message)) {
                 if (lastMessage && shouldSquash(lastMessage)) {
@@ -3682,6 +3696,7 @@ function loadOpenAISettings(data, settings) {
     oai_settings.min_p_openai = settings.min_p_openai ?? default_settings.min_p_openai;
     oai_settings.repetition_penalty_openai = settings.repetition_penalty_openai ?? default_settings.repetition_penalty_openai;
     oai_settings.stream_openai = settings.stream_openai ?? default_settings.stream_openai;
+    oai_settings.websearch_cohere = settings.websearch_cohere ?? default_settings.websearch_cohere;
     oai_settings.openai_max_context = settings.openai_max_context ?? default_settings.openai_max_context;
     oai_settings.openai_max_tokens = settings.openai_max_tokens ?? default_settings.openai_max_tokens;
     oai_settings.bias_preset_selected = settings.bias_preset_selected ?? default_settings.bias_preset_selected;
@@ -3707,6 +3722,7 @@ function loadOpenAISettings(data, settings) {
     oai_settings.custom_include_body = settings.custom_include_body ?? default_settings.custom_include_body;
     oai_settings.custom_exclude_body = settings.custom_exclude_body ?? default_settings.custom_exclude_body;
     oai_settings.custom_include_headers = settings.custom_include_headers ?? default_settings.custom_include_headers;
+    oai_settings.custom_prompt_post_processing = settings.custom_prompt_post_processing ?? default_settings.custom_prompt_post_processing;
     oai_settings.google_model = settings.google_model ?? default_settings.google_model;
     oai_settings.chat_completion_source = settings.chat_completion_source ?? default_settings.chat_completion_source;
     oai_settings.api_url_scale = settings.api_url_scale ?? default_settings.api_url_scale;
@@ -3741,8 +3757,10 @@ function loadOpenAISettings(data, settings) {
     if (settings.use_ai21_tokenizer !== undefined) { oai_settings.use_ai21_tokenizer = !!settings.use_ai21_tokenizer; oai_settings.use_ai21_tokenizer ? ai21_max = 8191 : ai21_max = 9200; }
     if (settings.use_google_tokenizer !== undefined) oai_settings.use_google_tokenizer = !!settings.use_google_tokenizer;
     if (settings.claude_use_sysprompt !== undefined) oai_settings.claude_use_sysprompt = !!settings.claude_use_sysprompt;
+    if (settings.use_makersuite_sysprompt !== undefined) oai_settings.use_makersuite_sysprompt = !!settings.use_makersuite_sysprompt;
     if (settings.use_alt_scale !== undefined) { oai_settings.use_alt_scale = !!settings.use_alt_scale; updateScaleForm(); }
     $('#stream_toggle').prop('checked', oai_settings.stream_openai);
+    $('#websearch_toggle').prop('checked', oai_settings.websearch_cohere);
     $('#api_url_scale').val(oai_settings.api_url_scale);
     $('#openai_proxy_password').val(oai_settings.proxy_password);
     $('#claude_assistant_prefill').val(oai_settings.assistant_prefill);
@@ -3780,6 +3798,7 @@ function loadOpenAISettings(data, settings) {
     $('#use_ai21_tokenizer').prop('checked', oai_settings.use_ai21_tokenizer);
     $('#use_google_tokenizer').prop('checked', oai_settings.use_google_tokenizer);
     $('#claude_use_sysprompt').prop('checked', oai_settings.claude_use_sysprompt);
+    $('#use_makersuite_sysprompt').prop('checked', oai_settings.use_makersuite_sysprompt);
     $('#scale-alt').prop('checked', oai_settings.use_alt_scale);
     $('#openrouter_use_fallback').prop('checked', oai_settings.openrouter_use_fallback);
     $('#openrouter_force_instruct').prop('checked', oai_settings.openrouter_force_instruct);
@@ -3852,6 +3871,8 @@ function loadOpenAISettings(data, settings) {
 
     $('#chat_completion_source').val(oai_settings.chat_completion_source).trigger('change');
     $('#oai_max_context_unlocked').prop('checked', oai_settings.max_context_unlocked);
+    $('#custom_prompt_post_processing').val(oai_settings.custom_prompt_post_processing);
+    $(`#custom_prompt_post_processing option[value="${oai_settings.custom_prompt_post_processing}"]`).attr('selected', true);
 }
 
 function setNamesBehaviorControls() {
@@ -4006,6 +4027,7 @@ async function saveOpenAIPreset(name, settings, triggerUi = true) {
         custom_include_body: settings.custom_include_body,
         custom_exclude_body: settings.custom_exclude_body,
         custom_include_headers: settings.custom_include_headers,
+        custom_prompt_post_processing: settings.custom_prompt_post_processing,
         google_model: settings.google_model,
         temperature: settings.temp_openai,
         frequency_penalty: settings.freq_pen_openai,
@@ -4037,6 +4059,7 @@ async function saveOpenAIPreset(name, settings, triggerUi = true) {
         personality_format: settings.personality_format,
         group_nudge_prompt: settings.group_nudge_prompt,
         stream_openai: settings.stream_openai,
+        websearch_cohere: settings.websearch_cohere,
         prompts: settings.prompts,
         prompt_order: settings.prompt_order,
         api_url_scale: settings.api_url_scale,
@@ -4046,6 +4069,7 @@ async function saveOpenAIPreset(name, settings, triggerUi = true) {
         use_ai21_tokenizer: settings.use_ai21_tokenizer,
         use_google_tokenizer: settings.use_google_tokenizer,
         claude_use_sysprompt: settings.claude_use_sysprompt,
+        use_makersuite_sysprompt: settings.use_makersuite_sysprompt,
         use_alt_scale: settings.use_alt_scale,
         squash_system_messages: settings.squash_system_messages,
         image_inlining: settings.image_inlining,
@@ -4395,6 +4419,7 @@ function onSettingsPresetChange() {
         custom_include_body: ['#custom_include_body', 'custom_include_body', false],
         custom_exclude_body: ['#custom_exclude_body', 'custom_exclude_body', false],
         custom_include_headers: ['#custom_include_headers', 'custom_include_headers', false],
+        custom_prompt_post_processing: ['#custom_prompt_post_processing', 'custom_prompt_post_processing', false],
         google_model: ['#model_google_select', 'google_model', false],
         openai_max_context: ['#openai_max_context', 'openai_max_context', false],
         openai_max_tokens: ['#openai_max_tokens', 'openai_max_tokens', false],
@@ -4413,6 +4438,7 @@ function onSettingsPresetChange() {
         personality_format: ['#personality_format_textarea', 'personality_format', false],
         group_nudge_prompt: ['#group_nudge_prompt_textarea', 'group_nudge_prompt', false],
         stream_openai: ['#stream_toggle', 'stream_openai', true],
+        websearch_cohere: ['#websearch_toggle', 'websearch_cohere', true],
         prompts: ['', 'prompts', false],
         prompt_order: ['', 'prompt_order', false],
         api_url_scale: ['#api_url_scale', 'api_url_scale', false],
@@ -4423,6 +4449,7 @@ function onSettingsPresetChange() {
         use_ai21_tokenizer: ['#use_ai21_tokenizer', 'use_ai21_tokenizer', true],
         use_google_tokenizer: ['#use_google_tokenizer', 'use_google_tokenizer', true],
         claude_use_sysprompt: ['#claude_use_sysprompt', 'claude_use_sysprompt', true],
+        use_makersuite_sysprompt: ['#use_makersuite_sysprompt', 'use_makersuite_sysprompt', true],
         use_alt_scale: ['#use_alt_scale', 'use_alt_scale', true],
         squash_system_messages: ['#squash_system_messages', 'squash_system_messages', true],
         image_inlining: ['#openai_image_inlining', 'image_inlining', true],
@@ -4628,7 +4655,7 @@ async function onModelChange() {
 
     if (oai_settings.chat_completion_source == chat_completion_sources.MAKERSUITE) {
         if (oai_settings.max_context_unlocked) {
-            $('#openai_max_context').attr('max', unlocked_max);
+            $('#openai_max_context').attr('max', max_1mil);
         } else if (value === 'gemini-1.5-pro-latest') {
             $('#openai_max_context').attr('max', max_1mil);
         } else if (value === 'gemini-ultra' || value === 'gemini-1.0-pro-latest' || value === 'gemini-pro' || value === 'gemini-1.0-ultra-latest') {
@@ -5107,12 +5134,13 @@ export function isImageInliningSupported() {
         'gemini-1.0-pro-vision-latest',
         'gemini-1.5-pro-latest',
         'gemini-pro-vision',
-        'claude-3'
+        'claude-3',
+        'gpt-4-turbo',
     ];
 
     switch (oai_settings.chat_completion_source) {
         case chat_completion_sources.OPENAI:
-            return visionSupportedModels.some(model => oai_settings.openai_model.includes(model));
+            return visionSupportedModels.some(model => oai_settings.openai_model.includes(model) && !oai_settings.openai_model.includes('gpt-4-turbo-preview'));
         case chat_completion_sources.MAKERSUITE:
             return visionSupportedModels.some(model => oai_settings.google_model.includes(model));
         case chat_completion_sources.CLAUDE:
@@ -5232,8 +5260,7 @@ $('#delete_proxy').on('click', async function () {
 
 function runProxyCallback(_, value) {
     if (!value) {
-        toastr.warning('Proxy preset name is required');
-        return '';
+        return selected_proxy?.name || '';
     }
 
     const proxyNames = proxies.map(preset => preset.name);
@@ -5333,6 +5360,11 @@ $(document).ready(async function () {
         saveSettingsDebounced();
     });
 
+    $('#websearch_toggle').on('change', function () {
+        oai_settings.websearch_cohere = !!$('#websearch_toggle').prop('checked');
+        saveSettingsDebounced();
+    });
+
     $('#wrap_in_quotes').on('change', function () {
         oai_settings.wrap_in_quotes = !!$('#wrap_in_quotes').prop('checked');
         saveSettingsDebounced();
@@ -5355,6 +5387,11 @@ $(document).ready(async function () {
     $('#claude_use_sysprompt').on('change', function () {
         oai_settings.claude_use_sysprompt = !!$('#claude_use_sysprompt').prop('checked');
         $('#claude_human_sysprompt_message_block').toggle(oai_settings.claude_use_sysprompt);
+        saveSettingsDebounced();
+    });
+
+    $('#use_makersuite_sysprompt').on('change', function () {
+        oai_settings.use_makersuite_sysprompt = !!$('#use_makersuite_sysprompt').prop('checked');
         saveSettingsDebounced();
     });
 
@@ -5485,6 +5522,7 @@ $(document).ready(async function () {
         toggleChatCompletionForms();
         saveSettingsDebounced();
         reconnectOpenAi();
+        forceCharacterEditorTokenize();
         eventSource.emit(event_types.CHATCOMPLETION_SOURCE_CHANGED, oai_settings.chat_completion_source);
     });
 
@@ -5572,6 +5610,11 @@ $(document).ready(async function () {
 
     $('#custom_model_id').on('input', function () {
         oai_settings.custom_model = String($(this).val());
+        saveSettingsDebounced();
+    });
+
+    $('#custom_prompt_post_processing').on('change', function () {
+        oai_settings.custom_prompt_post_processing = String($(this).val());
         saveSettingsDebounced();
     });
 
