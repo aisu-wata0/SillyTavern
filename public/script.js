@@ -93,6 +93,8 @@ import {
     sendOpenAIRequest,
     loadOpenAISettings,
     oai_settings,
+    ARA_local,
+    loadAbsoluteRPGAdventureSettings,
     openai_messages_count,
     chat_completion_sources,
     getChatCompletionModel,
@@ -6223,6 +6225,9 @@ async function getSettings() {
         // Load power user settings
         loadPowerUserSettings(settings, data);
 
+        // Load AbsoluteRPGAdventure settings
+        loadAbsoluteRPGAdventureSettings(settings, data);
+
         // Load character tags
         loadTagsSettings(settings);
 
@@ -6330,6 +6335,7 @@ async function saveSettings(type) {
             swipes: swipes,
             horde_settings: horde_settings,
             power_user: power_user,
+            AbsoluteRPGAdventure: ARA_local.config_text,
             extension_settings: extension_settings,
             tags: tags,
             tag_map: tag_map,

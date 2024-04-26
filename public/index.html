@@ -4268,17 +4268,27 @@
                                     <i class="fa-lg fa-solid fa-repeat"></i>
                                 </div>
                                 &nbsp;
-                                <span id="ARA_button_config_reset_text">Reset config</span>
+                                <span id="ARA_button_config_reset_text">Reset to default</span>
                             </div>
-                            <small> (you need to then confirm, or reload to undo) (resizable)</small>
+                            <div id="ARA_button_config_restore" class="menu_button whitespacenowrap">
+                                <div>
+                                    <i class="fa-lg fa-solid fa-repeat"></i>
+                                </div>
+                                &nbsp;
+                                <span id="ARA_button_config_restore_text">Reset to last saved</span>
+                            </div>
                         </div>
+                        <small> (Confirm after any of these!)</small>
                         <div id="ARA-config_text" contenteditable="true"></div>
-
-                        <div id="ARA_config_send" style="display: flex;" class="menu_button whitespacenowrap">
-                            <i class="fa-solid fa-feather-pointed" title="Send config" style="display: flex;"></i>
-                            <div id="ARA_config_waiting" style="display: none;"><i title="Waiting" class="fa-solid fa-hourglass-half"></i></div>
-                            &nbsp;
-                            <span id="ARA_button_config_confirm"> Confirm config</span><span id="ARA_button_config_error"></span>
+                        
+                        <div  style="display: flex;">
+                            <div id="ARA_config_send" style="display: flex;" class="menu_button whitespacenowrap">
+                                <i class="fa-solid fa-feather-pointed" title="Send config" style="display: flex;"></i>
+                                <div id="ARA_config_waiting" style="display: none;"><i title="Waiting" class="fa-solid fa-hourglass-half"></i></div>
+                                &nbsp;
+                                <span id="ARA_button_config_confirm"> Confirm config</span><span id="ARA_button_config_error"></span>
+                            </div>
+                            <small>(the above is resizable)</small>
                         </div>
                     </div>
                 </div>

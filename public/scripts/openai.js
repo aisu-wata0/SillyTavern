@@ -80,6 +80,8 @@ export {
     IdentifierNotFoundError,
     Message,
     MessageCollection,
+    ARA_local,
+    loadAbsoluteRPGAdventureSettings,
 };
 
 let openai_messages_count = 0;
@@ -1433,6 +1435,8 @@ let ARA_local = {
     },
     regeneratingSummary: false,
 
+    loaded: false,
+
     config: {},
 };
 
@@ -1724,35 +1728,51 @@ function ARA_parse_txt(txt) {
     return fn();
 }
 
+function ARA_settingsSetText(config_text) {
+    if (!config_text) {
+        return
+    }
+    try {
+        ARA_local.config = ARA_parse_txt(config_text);
+        ARA_configSetUI(config_text);
+        ARA_local.config_text = config_text;
+    } catch (error) {
+        console.error('Absolute RPG Adventure: ARA_settingsSetText:', error);
+        return;
+    }
+
+    // Save
+    localStorage.setItem('ARA_local.config_text', ARA_local.config_text);
+    saveSettingsDebounced();
+}
+
+function loadAbsoluteRPGAdventureSettings(settings, data) {
+    // Load from settings.json
+    if (settings.AbsoluteRPGAdventure != null) {
+        ARA_settingsSetText(settings.AbsoluteRPGAdventure);
+        ARA_local.loaded = true;
+        console.warn('Absolute RPG Adventure:', "ARA_local.loaded", settings.AbsoluteRPGAdventure);
+    } else {
+        console.warn('Absolute RPG Adventure:', "loadAbsoluteRPGAdventureSettings", "!ARA_local.loaded");
+        ARA_configReset();
+    }
+}
+
 const ARA_config_default = ARA_parse_txt(ARA_config_default_txt);
 
 function ARA_configLoad() {
-    let s = localStorage.getItem('ARA.config');
+    if (ARA_local.loaded) {
+        return;
+    }
+    console.warn('Absolute RPG Adventure:', "!ARA_local.loaded");
+    const config_text = localStorage.getItem('ARA.config_text');
     try {
-        if (s) {
-            let o = ARA_parse_txt(s);
-            ARA_local.config = o;
-            ARA_configSetUI(s);
-            return o;
-        }
+        ARA_settingsSetText(config_text)
     } catch (error) {
         console.error('Absolute RPG Adventure:', error);
     }
-    ARA_configReset();
-    return s;
 }
 
-/** if config_text is invalid, this throws */
-function ARA_configSave(config_text = null) {
-    let text = null;
-    if (config_text) {
-        text = config_text;
-        ARA_local.config = ARA_parse_txt(config_text);
-    } else {
-        text = JSON.stringify(ARA_local.config);
-    }
-    localStorage.setItem('ARA.config', text);
-}
 function ARA_configGetUI() {
     const config_text_el = document.querySelector('#ARA-config_text');
     let cfg = config_text_el.innerText;
@@ -1764,6 +1784,7 @@ function ARA_configGetUI() {
     }
     return '';
 }
+
 function ARA_configSetUI(config_text = null) {
     if (!config_text) {
         config_text = JSON.stringify(ARA_local.config, null, '  ');
@@ -1783,9 +1804,15 @@ function ARA_configSetUI(config_text = null) {
         config_text_el.children[0].value = config_text;
     }
 }
+
 function ARA_configReset() {
-    ARA_local.config = ARA_parse_txt(ARA_config_default_txt);
     ARA_configSetUI(ARA_config_default_txt);
+    // user needs to confirm afterwards
+}
+
+function ARA_configRestore() {
+    ARA_configSetUI(ARA_local.config_text);
+    // user needs to confirm afterwards
 }
 
 
@@ -1794,7 +1821,7 @@ async function ARA_configEditText() {
     let ARA_button_config_error = document.querySelector('#ARA_button_config_error');
 
     try {
-        ARA_configSave(config_text);
+        ARA_settingsSetText(config_text);
         console.info('Absolute RPG Adventure:', 'config set', ARA_local.config);
         ARA_button_config_error.innerHTML = '; OK';
     } catch (error) {
@@ -1890,9 +1917,11 @@ window.addEventListener('load', () => {
     // # config
     ARA_configLoad();
     let ARA_config_send = document.querySelector('#ARA_config_send');
-    let ARA_button_config_reset = document.querySelector('#ARA_button_config_reset');
     ARA_config_send.onclick = ARA_configEditText;
+    let ARA_button_config_reset = document.querySelector('#ARA_button_config_reset');
     ARA_button_config_reset.onclick = ARA_configReset;
+    let ARA_button_config_restore = document.querySelector('#ARA_button_config_restore');
+    ARA_button_config_restore.onclick = ARA_configRestore;
 
     // # summary
     let ARA_button_summary_regenerate = document.querySelector('#ARA_button_summary_regenerate');
