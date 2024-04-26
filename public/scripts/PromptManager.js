@@ -841,7 +841,7 @@ class PromptManager {
             const promptReferences = this.getPromptOrderForCharacter(this.activeCharacter);
             for (let i = promptReferences.length - 1; i >= 0; i--) {
                 const reference = promptReferences[i];
-                if (-1 === this.serviceSettings.prompts.findIndex(prompt => prompt.identifier === reference.identifier)) {
+                if (reference && -1 === this.serviceSettings.prompts.findIndex(prompt => prompt.identifier === reference.identifier)) {
                     promptReferences.splice(i, 1);
                     this.log('Removed unused reference: ' + reference.identifier);
                 }
@@ -1398,7 +1398,8 @@ class PromptManager {
             `;
 
             const rangeBlockDiv = promptManagerDiv.querySelector('.range-block');
-            rangeBlockDiv.insertAdjacentHTML('beforeend', footerHtml);
+            const headerDiv = promptManagerDiv.querySelector('.completion_prompt_manager_header');
+            headerDiv.insertAdjacentHTML('afterend', footerHtml);
             rangeBlockDiv.querySelector('#prompt-manager-reset-character').addEventListener('click', this.handleCharacterReset);
 
             const footerDiv = rangeBlockDiv.querySelector(`.${this.configuration.prefix}prompt_manager_footer`);
@@ -1427,7 +1428,12 @@ class PromptManager {
 
             rangeBlockDiv.insertAdjacentHTML('beforeend', exportPopup);
 
-            let exportPopper = Popper.createPopper(
+            // Destroy previous popper instance if it exists
+            if (this.exportPopper) {
+                this.exportPopper.destroy();
+            }
+
+            this.exportPopper = Popper.createPopper(
                 document.getElementById('prompt-manager-export'),
                 document.getElementById('prompt-manager-export-format-popup'),
                 { placement: 'bottom' },
@@ -1440,7 +1446,7 @@ class PromptManager {
                 if (show) popup.removeAttribute('data-show');
                 else popup.setAttribute('data-show', '');
 
-                exportPopper.update();
+                this.exportPopper.update();
             };
 
             footerDiv.querySelector('#prompt-manager-import').addEventListener('click', this.handleImport);

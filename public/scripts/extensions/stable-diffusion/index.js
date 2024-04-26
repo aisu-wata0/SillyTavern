@@ -37,6 +37,8 @@ const p = a => `<p>${a}</p>`;
 
 const MODULE_NAME = 'sd';
 const UPDATE_INTERVAL = 1000;
+// This is a 1x1 transparent PNG
+const PNG_PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
 const sources = {
     extras: 'extras',
@@ -1656,6 +1658,10 @@ async function loadNovelModels() {
             text: 'NAI Diffusion Anime V1 (Curated)',
         },
         {
+            value: 'nai-diffusion-furry-3',
+            text: 'NAI Diffusion Furry V3',
+        },
+        {
             value: 'nai-diffusion-furry',
             text: 'NAI Diffusion Furry',
         },
@@ -2111,21 +2117,11 @@ async function generateMultimodalPrompt(generationType, quietPrompt) {
     let avatarUrl;
 
     if (generationType == generationMode.USER_MULTIMODAL) {
-        avatarUrl = getUserAvatar(user_avatar);
+        avatarUrl = getUserAvatarUrl();
     }
 
     if (generationType == generationMode.CHARACTER_MULTIMODAL || generationType === generationMode.FACE_MULTIMODAL) {
-        const context = getContext();
-
-        if (context.groupId) {
-            const groupMembers = context.groups.find(x => x.id === context.groupId)?.members;
-            const lastMessageAvatar = context.chat?.filter(x => !x.is_system && !x.is_user)?.slice(-1)[0]?.original_avatar;
-            const randomMemberAvatar = Array.isArray(groupMembers) ? groupMembers[Math.floor(Math.random() * groupMembers.length)]?.avatar : null;
-            const avatarToUse = lastMessageAvatar || randomMemberAvatar;
-            avatarUrl = formatCharacterAvatar(avatarToUse);
-        } else {
-            avatarUrl = getCharacterAvatar(context.characterId);
-        }
+        avatarUrl = getCharacterAvatarUrl();
     }
 
     try {
@@ -2150,6 +2146,24 @@ async function generateMultimodalPrompt(generationType, quietPrompt) {
         toastr.error('Multimodal captioning failed. Please try again.', 'Image Generation');
         throw new Error('Multimodal captioning failed.');
     }
+}
+
+function getCharacterAvatarUrl() {
+    const context = getContext();
+
+    if (context.groupId) {
+        const groupMembers = context.groups.find(x => x.id === context.groupId)?.members;
+        const lastMessageAvatar = context.chat?.filter(x => !x.is_system && !x.is_user)?.slice(-1)[0]?.original_avatar;
+        const randomMemberAvatar = Array.isArray(groupMembers) ? groupMembers[Math.floor(Math.random() * groupMembers.length)]?.avatar : null;
+        const avatarToUse = lastMessageAvatar || randomMemberAvatar;
+        return formatCharacterAvatar(avatarToUse);
+    } else {
+        return getCharacterAvatar(context.characterId);
+    }
+}
+
+function getUserAvatarUrl() {
+    return getUserAvatar(user_avatar);
 }
 
 /**
@@ -2636,6 +2650,26 @@ async function generateComfyImage(prompt, negativePrompt) {
     (extension_settings.sd.comfy_placeholders ?? []).forEach(ph => {
         workflow = workflow.replace(`"%${ph.find}%"`, JSON.stringify(substituteParams(ph.replace)));
     });
+    if (/%user_avatar%/gi.test(workflow)) {
+        const response = await fetch(getUserAvatarUrl());
+        if (response.ok) {
+            const avatarBlob = await response.blob();
+            const avatarBase64 = await getBase64Async(avatarBlob);
+            workflow = workflow.replace('"%user_avatar%"', JSON.stringify(avatarBase64));
+        } else {
+            workflow = workflow.replace('"%user_avatar%"', JSON.stringify(PNG_PIXEL));
+        }
+    }
+    if (/%char_avatar%/gi.test(workflow)) {
+        const response = await fetch(getCharacterAvatarUrl());
+        if (response.ok) {
+            const avatarBlob = await response.blob();
+            const avatarBase64 = await getBase64Async(avatarBlob);
+            workflow = workflow.replace('"%char_avatar%"', JSON.stringify(avatarBase64));
+        } else {
+            workflow = workflow.replace('"%char_avatar%"', JSON.stringify(PNG_PIXEL));
+        }
+    }
     console.log(`{
         "prompt": ${workflow}
     }`);
@@ -2649,6 +2683,10 @@ async function generateComfyImage(prompt, negativePrompt) {
             }`,
         }),
     });
+    if (!promptResult.ok) {
+        const text = await promptResult.text();
+        throw new Error(text);
+    }
     return { format: 'png', data: await promptResult.text() };
 }
 

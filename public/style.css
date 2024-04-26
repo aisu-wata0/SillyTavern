@@ -5,6 +5,7 @@
 @import url(css/character-group-overlay.css);
 @import url(css/file-form.css);
 @import url(css/logprobs.css);
+@import url(css/accounts.css);
 
 :root {
     --doc-height: 100%;
@@ -157,6 +158,7 @@ body {
     border-top: 20px solid transparent;
     min-height: 40px;
 }
+
 ::-webkit-scrollbar-thumb:horizontal {
     background-color: var(--grey7070a);
     box-shadow: inset 0 0 0 1px var(--black50a);
@@ -456,7 +458,7 @@ body.reduced-motion #bg_custom {
 }
 
 #bg1 {
-    background-image: url('backgrounds/__transparent.png');
+    background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=');
     z-index: -3;
 }
 
@@ -708,7 +710,8 @@ body .panelControlBar {
 }
 
 #options,
-#extensionsMenu {
+#extensionsMenu,
+.shadow_popup .popper-modal {
     display: flex;
     z-index: 29999;
     background-color: var(--SmartThemeBlurTintColor);
@@ -799,7 +802,7 @@ body .panelControlBar {
 .mes {
     display: flex;
     align-items: flex-start;
-    padding: 20px 10px 0 10px;
+    padding: 10px 10px 0 10px;
     margin-top: 0;
     width: 100%;
     color: var(--SmartThemeBodyColor);
@@ -2251,7 +2254,8 @@ grammarly-extension {
     margin-right: 25px;
 }
 
-#shadow_popup, .shadow_popup {
+#shadow_popup,
+.shadow_popup {
     backdrop-filter: blur(calc(var(--SmartThemeBlurStrength) * 2));
     -webkit-backdrop-filter: blur(calc(var(--SmartThemeBlurStrength) * 2));
     background-color: var(--black30a);
@@ -2263,9 +2267,15 @@ grammarly-extension {
     height: 100svh;
     z-index: 9999;
     top: 0;
+
     &.shadow_popup {
         z-index: 9998;
     }
+}
+
+.dialogue_popup.dragover {
+    filter: brightness(1.1) saturate(1.1);
+    outline: 3px dashed var(--SmartThemeBorderColor);
 }
 
 #bgtest {
@@ -3424,7 +3434,7 @@ a {
 }
 
 #ui_language_select {
-    width: 10em;
+    width: 8em;
 }
 
 #extensions_settings .inline-drawer-toggle.inline-drawer-header:hover,

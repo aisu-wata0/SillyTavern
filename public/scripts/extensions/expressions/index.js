@@ -507,6 +507,10 @@ async function loadTalkingHead() {
                 },
                 body: JSON.stringify(emotionsSettings),
             });
+
+            if (!apiResult.ok) {
+                throw new Error(apiResult.statusText);
+            }
         }
         catch (error) {
             // it's ok if not supported
@@ -539,6 +543,10 @@ async function loadTalkingHead() {
                 },
                 body: JSON.stringify(animatorSettings),
             });
+
+            if (!apiResult.ok) {
+                throw new Error(apiResult.statusText);
+            }
         }
         catch (error) {
             // it's ok if not supported
@@ -1076,6 +1084,7 @@ async function getExpressionLabel(text) {
             case EXPRESSION_API.llm: {
                 const expressionsList = await getExpressionsList();
                 const prompt = await getLlmPrompt(expressionsList);
+                eventSource.once(event_types.TEXT_COMPLETION_SETTINGS_READY, onTextGenSettingsReady);
                 const emotionResponse = await generateQuietPrompt(prompt, false, false);
                 return parseLlmResponse(emotionResponse, expressionsList);
             }
@@ -1261,13 +1270,10 @@ async function getExpressionsList() {
      * @returns {Promise<string[]>}
      */
     async function resolveExpressionsList() {
-        // get something for offline mode (default images)
-        if (!modules.includes('classify') && extension_settings.expressions.api == EXPRESSION_API.extras) {
-            return DEFAULT_EXPRESSIONS;
-        }
-
+        // See if we can retrieve a specific expression list from the API
         try {
-            if (extension_settings.expressions.api == EXPRESSION_API.extras) {
+            // Check Extras api first, if enabled and that module active
+            if (extension_settings.expressions.api == EXPRESSION_API.extras && modules.includes('classify')) {
                 const url = new URL(getApiUrl());
                 url.pathname = '/api/classify/labels';
 
@@ -1282,7 +1288,10 @@ async function getExpressionsList() {
                     expressionsList = data.labels;
                     return expressionsList;
                 }
-            } else {
+            }
+
+            // If running the local classify model (not using the LLM), we ask that one
+            if (extension_settings.expressions.api == EXPRESSION_API.local) {
                 const apiResult = await fetch('/api/extra/classify/labels', {
                     method: 'POST',
                     headers: getRequestHeaders(),
@@ -1294,11 +1303,12 @@ async function getExpressionsList() {
                     return expressionsList;
                 }
             }
-        }
-        catch (error) {
+        } catch (error) {
             console.log(error);
-            return [];
         }
+
+        // If there was no specific list, or an error, just return the default expressions
+        return DEFAULT_EXPRESSIONS;
     }
 
     const result = await resolveExpressionsList();
@@ -1956,7 +1966,6 @@ function migrateSettings() {
     });
     eventSource.on(event_types.MOVABLE_PANELS_RESET, updateVisualNovelModeDebounced);
     eventSource.on(event_types.GROUP_UPDATED, updateVisualNovelModeDebounced);
-    eventSource.on(event_types.TEXT_COMPLETION_SETTINGS_READY, onTextGenSettingsReady);
     registerSlashCommand('sprite', setSpriteSlashCommand, ['emote'], '<span class="monospace">(spriteId)</span> – force sets the sprite for the current character', true, true);
     registerSlashCommand('spriteoverride', setSpriteSetCommand, ['costume'], '<span class="monospace">(optional folder)</span> – sets an override sprite folder for the current character. If the name starts with a slash or a backslash, selects a sub-folder in the character-named folder. Empty value to reset to default.', true, true);
     registerSlashCommand('lastsprite', (_, value) => lastExpression[value.trim()] ?? '', [], '<span class="monospace">(charName)</span> – Returns the last set sprite / expression for the named character.', true, true);
