@@ -1453,7 +1453,7 @@ function ARA_summary_request() {
         chat = ARA_local.chats[ARA_local.summary_current.chat_id];
     }
     if (isEmpty(chat.summaries)) {
-        console.warn('Absolute RPG Adventure:', 'No summaries in chat', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)), '\n', 'chat', JSON.parse(JSON.stringify(chat)));
+        console.info('Absolute RPG Adventure:', 'No summaries in chat', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)), '\n', 'chat', JSON.parse(JSON.stringify(chat)));
         return null;
     }
     let summary = chat.summaries[ARA_local.summary_current.idxEndGlobal];
