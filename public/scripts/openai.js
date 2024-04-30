@@ -1907,7 +1907,7 @@ function cleanUrl(url) {
     return url;
 }
 
-window.addEventListener('load', () => {
+const ARAonLoad = () => {
     let redirect_url = 'http://localhost:8000';
 
     document.querySelector('#ARAauthURI').href = 'https://discord.com/oauth2/authorize?client_id=1103136093001502780&redirect_uri=' + redirect_url + '&response_type=token&scope=identify';
@@ -1969,7 +1969,13 @@ window.addEventListener('load', () => {
             ARA_button_summary_regenerate_text.innerHTML = button_summary_regenerate_innerHTML;
         }
     };
-});
+}
+
+if (document.readyState === "complete") {
+    ARAonLoad();
+} else {
+    window.addEventListener('load', ARAonLoad);
+}
 
 async function ARA_get() {
     const fragment = new URLSearchParams(window.location.hash.slice(1));
