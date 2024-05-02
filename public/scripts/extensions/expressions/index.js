@@ -6,6 +6,7 @@ import { registerSlashCommand } from '../../slash-commands.js';
 import { onlyUnique, debounce, getCharaFilename, trimToEndSentence, trimToStartSentence } from '../../utils.js';
 import { hideMutedSprites } from '../../group-chats.js';
 import { isJsonSchemaSupported } from '../../textgen-settings.js';
+import { debounce_timeout } from '../../constants.js';
 export { MODULE_NAME };
 
 const MODULE_NAME = 'expressions';
@@ -94,7 +95,7 @@ async function forceUpdateVisualNovelMode() {
     }
 }
 
-const updateVisualNovelModeDebounced = debounce(forceUpdateVisualNovelMode, 100);
+const updateVisualNovelModeDebounced = debounce(forceUpdateVisualNovelMode, debounce_timeout.quick);
 
 async function updateVisualNovelMode(name, expression) {
     const container = $('#visual-novel-wrapper');

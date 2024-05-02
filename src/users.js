@@ -299,7 +299,7 @@ async function migrateUserData() {
                 fs.cpSync(
                     migration.old,
                     path.join(backupDirectory, path.basename(migration.old)),
-                    { recursive: true, force: true }
+                    { recursive: true, force: true },
                 );
                 fs.rmSync(migration.old, { recursive: true, force: true });
             } else {
@@ -309,7 +309,7 @@ async function migrateUserData() {
                 fs.cpSync(
                     migration.old,
                     path.join(backupDirectory, path.basename(migration.old)),
-                    { recursive: true, force: true }
+                    { recursive: true, force: true },
                 );
                 fs.rmSync(migration.old, { recursive: true, force: true });
             }
@@ -612,9 +612,13 @@ function createRouteHandler(directoryFn) {
         try {
             const directory = directoryFn(req);
             const filePath = decodeURIComponent(req.params[0]);
+            const exists = fs.existsSync(path.join(directory, filePath));
+            if (!exists) {
+                return res.sendStatus(404);
+            }
             return res.sendFile(filePath, { root: directory });
         } catch (error) {
-            return res.sendStatus(404);
+            return res.sendStatus(500);
         }
     };
 }

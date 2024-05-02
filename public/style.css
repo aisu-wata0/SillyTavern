@@ -259,6 +259,7 @@ table.responsiveTable {
 .mes_text table {
     border-spacing: 0;
     border-collapse: collapse;
+    margin-bottom: 10px;
 }
 
 .mes_text td,
@@ -1811,6 +1812,8 @@ input[type=search]:focus::-webkit-search-cancel-button {
     word-break: break-word;
     background-color: var(--black50a);
     font-size: calc(var(--fontScale) * 0.9em);
+    max-height: 50%;
+    overflow-y: clip;
 }
 
 .bg_example[custom="true"] .BGSampleTitle {
@@ -3176,6 +3179,15 @@ body.big-avatars .missing-avatar {
     text-align: center;
 }
 
+
+.userSettingsInnerExpandable {
+    border: 1px solid;
+    border-color: var(--SmartThemeBorderColor);
+    border-radius: 5px;
+    padding: 2px 5px !important;
+    margin: 5px 0;
+}
+
 @keyframes ellipsis {
     0% {
         content: ""
@@ -3554,7 +3566,6 @@ body:has(#character_popup.open) #top-settings-holder:has(.drawer-content.openDra
     border-radius: 10px;
     padding: 5px;
     border: 1px solid var(--SmartThemeBorderColor);
-    box-shadow: 0 0 20px black;
     min-width: 450px;
     width: var(--sheldWidth);
     overflow-y: auto;
