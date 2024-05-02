@@ -1,5 +1,24 @@
+diff --git a/AbsoluteRPGAdventure-staging.patch b/AbsoluteRPGAdventure-staging.patch
+new file mode 100644
+index 00000000..e69de29b
+diff --git a/default/config.yaml b/default/config.yaml
+index 355573d9..e9a72700 100644
+--- a/default/config.yaml
++++ b/default/config.yaml
+@@ -14,6 +14,11 @@ enableForwardedWhitelist: true
+ # Whitelist of allowed IP addresses
+ whitelist:
+   - 127.0.0.1
++  - 192.168.18.51
++  - 192.168.18.52
++  - 192.168.18.53
++  - 192.168.18.54
++  - 192.168.18.16
+ # Toggle basic authentication for endpoints
+ basicAuthMode: false
+ # Basic authentication credentials
 diff --git a/public/index.html b/public/index.html
-index 8bcc22b2..b5d49f2c 100644
+index 8bcc22b2..060659ca 100644
 --- a/public/index.html
 +++ b/public/index.html
 @@ -4216,6 +4216,139 @@
@@ -36,7 +55,7 @@ index 8bcc22b2..b5d49f2c 100644
 +                    </label>
 +
 +                    <label for="absoluteRPGAdventureToken">| Logged in:</label>
-+                    <a href="" id="ARAauthURI">
++                    <a id="ARAauthURI">
 +                        <div id="absoluteRPGAdventureLoggedIn" class="menu_button whitespacenowrap">No!</div>
 +                    </a>
 +                </div>
@@ -306,7 +325,7 @@ index 7c12d576..a7b72530 100644
                  $(RPanelPin).prop('checked') === false) {
                  $('#rightNavDrawerIcon').trigger('click');
 diff --git a/public/scripts/openai.js b/public/scripts/openai.js
-index 87eba767..a7f86bc3 100644
+index 87eba767..68f9f4bb 100644
 --- a/public/scripts/openai.js
 +++ b/public/scripts/openai.js
 @@ -80,6 +80,8 @@ export {
@@ -318,7 +337,7 @@ index 87eba767..a7f86bc3 100644
  };
  
  let openai_messages_count = 0;
-@@ -1306,6 +1308,1081 @@ function checkQuotaError(data) {
+@@ -1306,6 +1308,1167 @@ function checkQuotaError(data) {
      }
  }
  
@@ -467,7 +486,7 @@ index 87eba767..a7f86bc3 100644
 +        chat = ARA_local.chats[ARA_local.summary_current.chat_id];
 +    }
 +    if (isEmpty(chat.summaries)) {
-+        console.warn('Absolute RPG Adventure:', 'No summaries in chat', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)), '\n', 'chat', JSON.parse(JSON.stringify(chat)));
++        console.info('Absolute RPG Adventure:', 'No summaries in chat', 'summary_current', JSON.parse(JSON.stringify(ARA_local.summary_current)), '\n', 'chat', JSON.parse(JSON.stringify(chat)));
 +        return null;
 +    }
 +    let summary = chat.summaries[ARA_local.summary_current.idxEndGlobal];
@@ -921,7 +940,7 @@ index 87eba767..a7f86bc3 100644
 +    return url;
 +}
 +
-+window.addEventListener('load', () => {
++const ARAonLoad = () => {
 +    let redirect_url = 'http://localhost:8000';
 +
 +    document.querySelector('#ARAauthURI').href = 'https://discord.com/oauth2/authorize?client_id=1103136093001502780&redirect_uri=' + redirect_url + '&response_type=token&scope=identify';
@@ -983,7 +1002,70 @@ index 87eba767..a7f86bc3 100644
 +            ARA_button_summary_regenerate_text.innerHTML = button_summary_regenerate_innerHTML;
 +        }
 +    };
-+});
++
++    ARAchoicesOnClickInit();
++}
++
++async function handleRPGChoiceClick() {
++    let choiceText = this.textContent.trim();
++    console.warn('Absolute RPG Adventure:', 'handleRPGChoiceClick: """', choiceText, '"""');
++    if (!choiceText.startsWith('[') || !choiceText.endsWith(']')) {
++        choiceText = "[" + choiceText + "]"
++    }
++
++    // Add selected html/css class to clicked choice
++    this.classList.add(RPGchoiceOptionSelectedHTMLSelector);
++
++    const textarea = textAreaGet();
++    const prev_textarea_value = textAreaGetValue(textarea);
++    // Set and Generate
++    textAreaSetValue(choiceText, textarea);
++    let generateType;
++    // async
++    Generate(generateType);
++    // Restore `prev_textarea_value`
++    // after some milliseconds
++    const restore_text_area_delay_ms = 1000;
++    setTimeout(() => {
++        console.warn('Absolute RPG Adventure:', 'Restoring previous send text = """', prev_textarea_value, '"""');
++        textAreaSetValue(prev_textarea_value, textarea);
++    }, restore_text_area_delay_ms);
++}
++
++const RPGchoiceOptionHTMLSelector = '.custom-RPG-choice-option';
++const RPGchoicesHTMLSelector = '.custom-RPG-choices';
++const RPGchoiceOptionSelectedHTMLSelector = '.custom-RPG-choice-selected';
++
++const ARAMutationObserver = new MutationObserver(ARAobserveChoices);
++
++if (document.readyState === "complete") {
++    ARAonLoad();
++} else {
++    window.addEventListener('load', ARAonLoad);
++}
++function ARAchoicesOnClickInit(mutationsList, observer) {
++    const RPGchoices = document.querySelectorAll(RPGchoiceOptionHTMLSelector);
++    RPGchoices.forEach(choice => {
++         choice.addEventListener('click', handleRPGChoiceClick);
++    });
++    // Start observing the target node for configured mutations
++    ARAMutationObserver.observe(document.body, { childList: true, subtree: true });
++}
++
++function ARAobserveChoices(mutationsList, observer) {
++    for(let mutation of mutationsList) {
++        if (mutation.type === 'childList') {
++            mutation.addedNodes.forEach(node => {
++                if (node.nodeType === Node.ELEMENT_NODE && node.matches(RPGchoicesHTMLSelector)) {
++                    node.querySelectorAll(RPGchoiceOptionHTMLSelector).forEach(choice => {
++                        choice.addEventListener('click', handleRPGChoiceClick);
++                    });
++                }
++            });
++        }
++    }
++}
++
 +
 +async function ARA_get() {
 +    const fragment = new URLSearchParams(window.location.hash.slice(1));
@@ -1105,11 +1187,34 @@ index 87eba767..a7f86bc3 100644
 +    }
 +}
 +
++function textAreaGet(textarea = null) {
++    if (!textarea) {
++        textarea = document.querySelector('#send_textarea');
++    }
++    return textarea
++}
++
++function textAreaGetValue(textarea = null) {
++    textarea = textAreaGet(textarea);
++    return textarea.value
++}
++
++function textAreaPrepend(text, textarea = null) {
++    textarea = textAreaGet(textarea);
++    text = text + textAreaGetValue(textarea)
++    textAreaSetValue(text, textarea);
++}
++
++function textAreaSetValue(text, textarea = null) {
++    textarea = textAreaGet(textarea);
++    textarea.value = text;
++    return textarea
++}
++
 +function ARA_showErrorMsg(errorMsg) {
 +    errorMsg = 'Absolute RPG Adventure: ' + errorMsg;
 +    console.error(errorMsg);
-+    let textarea = document.querySelector('#send_textarea');
-+    textarea.value = errorMsg + textarea.value;
++    textAreaPrepend(errorMsg);
 +}
 +
 +function ARA_notLoggedIn() {
@@ -1400,7 +1505,7 @@ index 87eba767..a7f86bc3 100644
  function checkModerationError(data) {
      const moderationError = data?.error?.message?.includes('requires moderation');
      if (moderationError) {
-@@ -1633,7 +2710,7 @@ async function sendAltScaleRequest(messages, logit_bias, signal, type) {
+@@ -1633,7 +2796,7 @@ async function sendAltScaleRequest(messages, logit_bias, signal, type) {
      return data.output;
  }
  
@@ -1409,7 +1514,7 @@ index 87eba767..a7f86bc3 100644
      // Provide default abort signal
      if (!signal) {
          signal = new AbortController().signal;
-@@ -1700,7 +2777,7 @@ async function sendOpenAIRequest(type, messages, signal) {
+@@ -1700,7 +2863,7 @@ async function sendOpenAIRequest(type, messages, signal) {
      }
  
      const model = getChatCompletionModel();
@@ -1418,7 +1523,7 @@ index 87eba767..a7f86bc3 100644
          'messages': messages,
          'model': model,
          'temperature': Number(oai_settings.temp_openai),
-@@ -1819,6 +2896,26 @@ async function sendOpenAIRequest(type, messages, signal) {
+@@ -1819,6 +2982,26 @@ async function sendOpenAIRequest(type, messages, signal) {
          generate_data['seed'] = oai_settings.seed;
      }
  
@@ -1445,7 +1550,7 @@ index 87eba767..a7f86bc3 100644
      const generate_url = '/api/backends/chat-completions/generate';
      const response = await fetch(generate_url, {
          method: 'POST',
-@@ -1840,9 +2937,9 @@ async function sendOpenAIRequest(type, messages, signal) {
+@@ -1840,9 +3023,9 @@ async function sendOpenAIRequest(type, messages, signal) {
              const swipes = [];
              while (true) {
                  const { done, value } = await reader.read();
@@ -1457,7 +1562,7 @@ index 87eba767..a7f86bc3 100644
                  tryParseStreamingError(response, rawData);
                  const parsed = JSON.parse(rawData);
  
-@@ -1855,6 +2952,13 @@ async function sendOpenAIRequest(type, messages, signal) {
+@@ -1855,6 +3038,13 @@ async function sendOpenAIRequest(type, messages, signal) {
  
                  yield { text, swipes: swipes, logprobs: parseChatCompletionLogprobs(parsed) };
              }
@@ -1471,7 +1576,7 @@ index 87eba767..a7f86bc3 100644
          };
      }
      else {
-@@ -2074,7 +3178,14 @@ class TokenHandler {
+@@ -2074,7 +3264,14 @@ class TokenHandler {
  }
  
  
