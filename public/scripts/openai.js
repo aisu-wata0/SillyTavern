@@ -1969,13 +1969,70 @@ const ARAonLoad = () => {
             ARA_button_summary_regenerate_text.innerHTML = button_summary_regenerate_innerHTML;
         }
     };
+
+    ARAchoicesOnClickInit();
 }
+
+async function handleRPGChoiceClick() {
+    let choiceText = this.textContent.trim();
+    console.info('Absolute RPG Adventure:', 'handleRPGChoiceClick: """', choiceText, '"""');
+    if (!choiceText.startsWith('[') || !choiceText.endsWith(']')) {
+        choiceText = "[" + choiceText + "]"
+    }
+
+    // Add selected html/css class to clicked choice
+    this.classList.add(RPGchoiceOptionSelectedHTMLSelector);
+
+    const textarea = textAreaGet();
+    const prev_textarea_value = textAreaGetValue(textarea);
+    // Set and Generate
+    textAreaSetValue(choiceText, textarea);
+    let generateType;
+    // async
+    Generate(generateType);
+    // Restore `prev_textarea_value`
+    // after some milliseconds
+    const restore_text_area_delay_ms = 1000;
+    setTimeout(() => {
+        console.info('Absolute RPG Adventure:', 'Restoring previous send text = """', prev_textarea_value, '"""');
+        textAreaSetValue(prev_textarea_value, textarea);
+    }, restore_text_area_delay_ms);
+}
+
+const RPGchoiceOptionHTMLSelector = '.custom-RPG-choice-option';
+const RPGchoicesHTMLSelector = '.custom-RPG-choices';
+const RPGchoiceOptionSelectedHTMLSelector = '.custom-RPG-choice-selected';
+
+const ARAMutationObserver = new MutationObserver(ARAobserveChoices);
 
 if (document.readyState === "complete") {
     ARAonLoad();
 } else {
     window.addEventListener('load', ARAonLoad);
 }
+function ARAchoicesOnClickInit(mutationsList, observer) {
+    const RPGchoices = document.querySelectorAll(RPGchoiceOptionHTMLSelector);
+    RPGchoices.forEach(choice => {
+         choice.addEventListener('click', handleRPGChoiceClick);
+    });
+    // Start observing the target node for configured mutations
+    ARAMutationObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+function ARAobserveChoices(mutationsList, observer) {
+    for(let mutation of mutationsList) {
+        if (mutation.type === 'childList') {
+            mutation.addedNodes.forEach(node => {
+                if (node.nodeType === Node.ELEMENT_NODE && node.matches(RPGchoicesHTMLSelector)) {
+                    node.querySelectorAll(RPGchoiceOptionHTMLSelector).forEach(choice => {
+                        choice.addEventListener('click', handleRPGChoiceClick);
+                    });
+                }
+            });
+        }
+    }
+}
+
 
 async function ARA_get() {
     const fragment = new URLSearchParams(window.location.hash.slice(1));
@@ -2097,11 +2154,34 @@ async function ARA_show(data, mock = false) {
     }
 }
 
+function textAreaGet(textarea = null) {
+    if (!textarea) {
+        textarea = document.querySelector('#send_textarea');
+    }
+    return textarea
+}
+
+function textAreaGetValue(textarea = null) {
+    textarea = textAreaGet(textarea);
+    return textarea.value
+}
+
+function textAreaPrepend(text, textarea = null) {
+    textarea = textAreaGet(textarea);
+    text = text + textAreaGetValue(textarea)
+    textAreaSetValue(text, textarea);
+}
+
+function textAreaSetValue(text, textarea = null) {
+    textarea = textAreaGet(textarea);
+    textarea.value = text;
+    return textarea
+}
+
 function ARA_showErrorMsg(errorMsg) {
     errorMsg = 'Absolute RPG Adventure: ' + errorMsg;
     console.error(errorMsg);
-    let textarea = document.querySelector('#send_textarea');
-    textarea.value = errorMsg + textarea.value;
+    textAreaPrepend(errorMsg);
 }
 
 function ARA_notLoggedIn() {
