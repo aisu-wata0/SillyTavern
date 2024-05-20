@@ -1418,6 +1418,10 @@ const absoluteRPGAdventureUrl = 'https://aisu-wata-ara.hf.space';
 // const absoluteRPGAdventureUrl = 'http://127.0.0.1:7860';
 // const absoluteRPGAdventureUrl = "https://152d-2001-1284-f514-50bf-a6af-5b2c-adfa-ba30.ngrok-free.app";
 
+const votingUrl = "";
+// const votingUrl = "http://localhost:7861";
+
+
 let ARA = {
     id: null,
     accessToken: null,
@@ -1986,30 +1990,56 @@ const ARAonLoad = () => {
     ARAchoicesOnClickInit();
 }
 
-async function handleRPGChoiceClick() {
-    let choiceText = this.textContent.trim();
-    console.info('Absolute RPG Adventure:', 'handleRPGChoiceClick: """', choiceText, '"""');
-    if (!choiceText.startsWith('[') || !choiceText.endsWith(']')) {
-        choiceText = "[" + choiceText + "]"
-    }
+function isGenerating() {
+    let r = (
+        $('#send_but').hasClass('displayNone')
+        || ARA_local.regeneratingSummary
+    );
+    // console.info("ARA:", "isGenerating()", r);
+    return r;
+}
 
-    // Add selected html/css class to clicked choice
-    this.classList.add(RPGchoiceOptionSelectedHTMLSelector);
+async function generateMain(text, restore_text_area_delay_ms = 1000) {
+    if (isGenerating()) {
+        // Disable buttons from working while it's generating.
+        return;
+    }
 
     const textarea = textAreaGet();
     const prev_textarea_value = textAreaGetValue(textarea);
     // Set and Generate
-    textAreaSetValue(choiceText, textarea);
+    textAreaSetValue(text, textarea);
     let generateType;
     // async
     Generate(generateType);
     // Restore `prev_textarea_value`
     // after some milliseconds
-    const restore_text_area_delay_ms = 1000;
-    setTimeout(() => {
+    return setTimeout(() => {
         console.info('Absolute RPG Adventure:', 'Restoring previous send text = """', prev_textarea_value, '"""');
         textAreaSetValue(prev_textarea_value, textarea);
     }, restore_text_area_delay_ms);
+}
+
+async function stringWrapParentheses(str) {
+    if (!str.startsWith('[') || !str.endsWith(']')) {
+        str = "[" + str + "]"
+    }
+    return str;
+}
+
+async function handleRPGChoiceClick() {
+    if (isGenerating()) {
+        // Disable buttons from working while it's generating.
+        return;
+    }
+
+    let choiceText = this.textContent.trim();
+    console.info('Absolute RPG Adventure:', 'handleRPGChoiceClick: """', choiceText, '"""');
+    choiceText = stringWrapParentheses(choiceText);
+
+    // Add selected html/css class to clicked choice
+    this.classList.add(RPGchoiceOptionSelectedHTMLSelector);
+    generateMain(choiceText);
 }
 
 const RPGchoiceOptionHTMLSelector = '.custom-RPG-choice-option';
@@ -2032,19 +2062,285 @@ function ARAchoicesOnClickInit(mutationsList, observer) {
     ARAMutationObserver.observe(document.body, { childList: true, subtree: true });
 }
 
+let choiceCreateTimeout = null;
+let choiceCreateTimeoutMs = 6000;
+
 function ARAobserveChoices(mutationsList, observer) {
+    let choices = [];
+    let options = 0;
     for(let mutation of mutationsList) {
         if (mutation.type === 'childList') {
             mutation.addedNodes.forEach(node => {
                 if (node.nodeType === Node.ELEMENT_NODE && node.matches(RPGchoicesHTMLSelector)) {
-                    node.querySelectorAll(RPGchoiceOptionHTMLSelector).forEach(choice => {
+                    let nodeElems = node.querySelectorAll(RPGchoiceOptionHTMLSelector);
+                    // console.info("ARA:", "ARAobserveChoices():", "Added node=", node, "\t nodeElems=", nodeElems);
+                    nodeElems.forEach(choice => {
                         choice.addEventListener('click', handleRPGChoiceClick);
+                        choices.push(choice.textContent);
                     });
+                    options = options + 1;
+                    
                 }
             });
         }
     }
+
+    if (options != 1) {
+        if (options > 1) {
+            console.warn("ARA:", "ARAobserveChoices():", "Too many options=", options, "  choices=", choices);
+        }
+    } else {
+        if (isGenerating()) {
+            console.warn("ARA:", "ARAobserveChoices():", "Still generating  options=", options, "  choiceCreateTimeout=", choiceCreateTimeout, "  choices=", choices);
+            if (choiceCreateTimeout) {
+                clearTimeout(choiceCreateTimeout);
+            }
+            
+            choiceCreateTimeout = setTimeout(
+                () => votingChoicesCreate(choices),
+                choiceCreateTimeoutMs,
+            );
+        } else {
+            votingChoicesCreate(choices);
+        }
+    }
 }
+
+
+// Voting stuff
+let VotingInternal = {
+    errors: {},
+    sentState: false,
+    updatePeriod: 10000,
+    timeout: null,
+}
+
+var votingState = {
+    Active: true,
+}
+
+let VoteTracker = {
+    Topics: {},
+    Commands: [],
+}
+
+async function votingFetchVoteTrackerState() {
+    try {
+        const response = await fetch(votingUrl + '/voteTracker');
+        const data = await response.json();
+        // Process the voteTracker state data
+        // Update the UI with the current voting progress and remaining time
+        VoteTracker = {
+            ...data,
+            Topics: {
+                ...VoteTracker.Topics,
+                ...data.Topics,
+            },
+        }
+        delete VotingInternal.errors.votingFetchVoteTrackerState
+        console.log("ARA:", "votingFetchVoteTrackerState()", "\n data=", JSON.stringify(data, null, "  "), "\n VoteTracker=", JSON.stringify(VoteTracker, null, "  "));
+    } catch (error) {
+        if (!VotingInternal.errors.votingFetchVoteTrackerState) {
+            VotingInternal.errors.votingFetchVoteTrackerState = error;
+            console.error('Error votingFetchVoteTrackerState():', error);
+        }
+        return error
+    }
+    return null
+}
+
+async function votingStateUpdate() {
+    try {
+        const response = await fetch(votingUrl + '/state-update', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(votingState),
+        });
+        VotingInternal.sentState = true;
+        delete VotingInternal.errors.votingStateUpdate
+    } catch (error) {
+        if (!VotingInternal.errors.votingStateUpdate) {
+            VotingInternal.errors.votingStateUpdate = error;
+            console.error('Error votingStateUpdate():', error);
+        }
+    }
+}
+
+async function votingChoicesCreate(choices) {
+    console.info("ARA:", "votingChoicesCreate():", "choices=", choices);
+    try {
+        let ChoicesIdxs = {}
+        // Loop thorugh choices and populate ChoicesIdxs as ChoicesIdxs[choice] = i
+        for (let i = 0; i < choices.length; i++) {
+            ChoicesIdxs[choices[i]] = i
+        }
+        let stateJson = JSON.stringify({
+            Name: "choose",
+            State: {
+                ChoicesIdxs: ChoicesIdxs,
+            },
+        })
+        console.info("ARA:", "votingChoicesCreate():", "stateJson", stateJson);
+
+        const response = await fetch(votingUrl + '/topic-create', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: stateJson
+        });
+        VotingInternal.sentState = true;
+        delete VotingInternal.errors.votingStateUpdate
+    } catch (error) {
+        if (!VotingInternal.errors.votingStateUpdate) {
+            VotingInternal.errors.votingStateUpdate = error;
+            console.error("ARA:", 'Error votingStateUpdate():', error);
+        }
+    }
+}
+
+function tallyVotes(topicName, topicState) {
+    // Count votes for each choice
+    const voteCounts = {};
+    for (let i = 0; i < Object.keys(topicState.Choices).length; i++) {
+        voteCounts[i] = 0;
+    }
+    for (const userId in topicState.Votes) {
+        const choiceIdx = topicState.Votes[userId];
+        voteCounts[choiceIdx]++;
+    }
+
+    // Find the choice(s) with the most votes
+    let maxVotes = -1;
+    const winningChoices = [];
+    for (const choiceIdx in voteCounts) {
+        const count = voteCounts[choiceIdx];
+        if (count > maxVotes) {
+            maxVotes = count;
+            winningChoices.length = 0;
+            winningChoices.push(parseInt(choiceIdx));
+        } else if (count === maxVotes) {
+            winningChoices.push(parseInt(choiceIdx));
+        }
+    }
+    console.warn("ARA:", "tallyVotes()", " winningChoices=", winningChoices, "  voteCounts=", voteCounts);
+
+    // // Sort the vote counts from highest to lowest
+    // const sortedVoteCounts = Object.entries(voteCounts)
+    // .sort(([, a], [, b]) => b - a)
+    // .reduce((r, [k, v]) => ({ ...r, [k]: v }), {});
+
+    // Build the results string
+    let results = `Vote result for topic '${topicName}':\n`;
+    if (winningChoices.length === 1) {
+        const choiceIdx = winningChoices[0];
+        const choice = topicState.Choices[choiceIdx];
+        results += `Choice ${choiceIdx} won with ${maxVotes} votes! ${choice}`;
+    } else {
+        results += `Tie between ${winningChoices.join(', ')} with ${maxVotes} votes each!`;
+    }
+
+    console.log("ARA:", results);
+    return winningChoices;
+}
+
+function checkExpiredTopics() {
+    const now = new Date();
+    let topicsExpired = {};
+    for (const topicName in VoteTracker.Topics) {
+        const topicState = VoteTracker.Topics[topicName];
+        let expirationDate = new Date(topicState.Expiration);
+        console.info("ARA:", "checkExpiredTopics()", "  topicName=", topicName, "  now > expirationDate=", now > expirationDate, "  now=", now, "  expirationDate=", expirationDate, "  topicState=", topicState);
+        if (now > expirationDate) {
+            topicsExpired[topicName] = VoteTracker.Topics[topicName];
+            topicsExpired[topicName].WinningChoices = tallyVotes(topicName, topicState);
+            delete VoteTracker.Topics[topicName];
+        }
+    }
+    return topicsExpired;
+}
+
+
+
+function chatBotCommands() {
+    for (const command of VoteTracker.Commands) {
+        if (command.Name == "!scroll") {
+            let el = document.getElementById("sheet-" + command.Content)
+            console.info("ARA:", "chatBotCommands()", "!scroll", "  command=", command, "  el=", el);
+            if (el) {
+                el.scrollIntoView(true);
+            }
+        }
+    }
+    VoteTracker.Commands = [];
+}
+
+async function votingUpdate() {
+    if (!votingUrl) {
+        return false;
+    }
+    let err = await votingFetchVoteTrackerState();
+    if (err) {
+        return false;
+    }
+    if (isGenerating()) {
+        if (votingState.Active) {
+            votingState.Active = false;
+            VotingInternal.sentState = false;
+        }
+    } else {
+        if (!votingState.Active) {
+            votingState.Active = true;
+            VotingInternal.sentState = false;
+        }
+
+        let topicsExpired = checkExpiredTopics();
+        if (!isEmpty(topicsExpired)) {
+            console.warn("ARA:", "votingUpdate()", " topicsExpired=", topicsExpired);
+            let topicName = "choose"
+            let topicExpired = topicsExpired[topicName]
+            if (topicExpired) {
+                let winningChoiceIdx = topicExpired.WinningChoices[0]
+                if (topicExpired.WinningChoices.length > 1) {
+                    // pick random winner
+                    let WinningChoicesRandomIdx = Math.floor(Math.random() * topicExpired.WinningChoices.length);
+                    winningChoiceIdx = topicExpired.WinningChoices[WinningChoicesRandomIdx];
+                    console.warn("ARA:", "votingUpdate().topicsExpired", " WinningChoicesRandomIdx=", WinningChoicesRandomIdx);
+                }
+                // send generate
+                let choiceText = topicExpired.Choices[winningChoiceIdx]
+                choiceText = stringWrapParentheses(choiceText);
+                generateMain(choiceText);
+            }
+        }
+    }
+
+    chatBotCommands();
+    await votingStateUpdate();
+    // if (!VotingInternal.sentState) {
+    // }
+    return true;
+}
+
+async function votingUpdateLoop() { 
+    let r = await votingUpdate();
+    let timeout = VotingInternal.updatePeriod;
+    if (!r) {
+        timeout = timeout * 10;
+    }
+    VotingInternal.timeout = setTimeout(
+        votingUpdateLoop,
+        timeout,
+    );
+}
+
+VotingInternal.timeout = setTimeout(votingUpdateLoop, VotingInternal.updatePeriod);
+// let votingInterval = setInterval(votingUpdate, VotingInternal.updatePeriod);
+
+
+// Voting stuff END
 
 
 async function ARA_get() {
@@ -2209,6 +2505,7 @@ async function ARA_generateSummary(signal) {
         console.error('Absolute RPG Adventure:', 'ARA_generateSummary(): No summary request');
         return null;
     }
+    toastr.info(`Generating a new summary: ${summary_request.summary.idxEndGlobal}`);
     const generate_data = summary_request.summary.body;
     const generate_url = '/api/backends/chat-completions/generate';
     const response = await fetch(generate_url, {
@@ -2251,7 +2548,7 @@ async function ARA_generateSummary(signal) {
     }
 
     console.info('Absolute RPG Adventure:', 'generateSummary() return ', data);
-    return data;
+    return {data, summary_request, };
 }
 
 function ARA_requestConfig() {
@@ -2320,15 +2617,17 @@ async function ARA_summary_regenerate(mock = false, signal = null) {
             document.querySelector('#ARA-summary_title').innerHTML = 'Waiting for summary...';
             console.info('Absolute RPG Adventure:', 'Generating summary', ARA_summary_request());
             let summary_output = await ARA_generateSummary(signal);
-            summary_text = summary_output.choices[0]['message']['content'];
+            summary_text = summary_output.data.choices[0]['message']['content'];
             document.querySelector('#ARA-summary_title').innerHTML = summary_title_before;
+            toastr.info(`Generated a new summary: ${summary_output.summary_request.summary.idxEndGlobal}`);
+            data = await ARA_summary_req_update(summary_text, false, mock, signal);
         } catch (error) {
             console.error(error);
             document.querySelector('#ARA-summary_title').innerHTML = summary_title_before + ` (Error: ${error})`;
             const errorMsg = 'while getting summary';
+            toastr.error(`Error ${errorMsg}`);
             throw new Error(errorMsg);
         }
-        data = await ARA_summary_req_update(summary_text, false, mock, signal);
     } finally {
         ARA_local.regeneratingSummary = false;
     }
