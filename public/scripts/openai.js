@@ -1414,12 +1414,12 @@ for (let i = 0; i < drawerTogglers.length; i++) {
 }
 
 // Temporary url for testing
-const absoluteRPGAdventureUrl = 'https://aisu-wata-ara.hf.space';
-// const absoluteRPGAdventureUrl = 'http://127.0.0.1:7860';
+// const absoluteRPGAdventureUrl = 'https://aisu-wata-ara.hf.space';
+const absoluteRPGAdventureUrl = 'http://127.0.0.1:7860';
 // const absoluteRPGAdventureUrl = "https://152d-2001-1284-f514-50bf-a6af-5b2c-adfa-ba30.ngrok-free.app";
 
-const votingUrl = "";
-// const votingUrl = "http://localhost:7861";
+// const votingUrl = "";
+const votingUrl = "http://localhost:7861";
 
 
 let ARA = {
@@ -2505,7 +2505,9 @@ async function ARA_generateSummary(signal) {
         console.error('Absolute RPG Adventure:', 'ARA_generateSummary(): No summary request');
         return null;
     }
-    toastr.info(`Generating a new summary: ${summary_request.summary.idxEndGlobal}`);
+    if (!ARA_local.config.summary?.disable_notification_toast) {
+        toastr.info(`Aisu: Generating a new summary: ${summary_request.summary.idxEndGlobal}`);
+    }
     const generate_data = summary_request.summary.body;
     const generate_url = '/api/backends/chat-completions/generate';
     const response = await fetch(generate_url, {
@@ -2619,13 +2621,15 @@ async function ARA_summary_regenerate(mock = false, signal = null) {
             let summary_output = await ARA_generateSummary(signal);
             summary_text = summary_output.data.choices[0]['message']['content'];
             document.querySelector('#ARA-summary_title').innerHTML = summary_title_before;
-            toastr.info(`Generated a new summary: ${summary_output.summary_request.summary.idxEndGlobal}`);
+            if (!ARA_local.config.summary?.disable_notification_toast) {
+                toastr.info(`Aisu: Finished summary generation: ${summary_output.summary_request.summary.idxEndGlobal}`);
+            }
             data = await ARA_summary_req_update(summary_text, false, mock, signal);
         } catch (error) {
             console.error(error);
             document.querySelector('#ARA-summary_title').innerHTML = summary_title_before + ` (Error: ${error})`;
             const errorMsg = 'while getting summary';
-            toastr.error(`Error ${errorMsg}`);
+            toastr.error(`Aisu: Error ${errorMsg}`);
             throw new Error(errorMsg);
         }
     } finally {
