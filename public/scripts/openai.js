@@ -2020,7 +2020,7 @@ async function generateMain(text, restore_text_area_delay_ms = 1000) {
     }, restore_text_area_delay_ms);
 }
 
-async function stringWrapParentheses(str) {
+function stringWrapParentheses(str) {
     if (!str.startsWith('[') || !str.endsWith(']')) {
         str = "[" + str + "]"
     }
