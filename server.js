@@ -283,6 +283,7 @@ app.use('/api/users', require('./src/endpoints/users-public').router);
 
 // Everything below this line requires authentication
 app.use(userModule.requireLoginMiddleware);
+app.get('/api/ping', (_, response) => response.sendStatus(204));
 
 // File uploads
 app.use(multer({ dest: UPLOADS_PATH, limits: { fieldSize: 10 * 1024 * 1024 } }).single('avatar'));
@@ -403,6 +404,11 @@ redirect('/api/content/import', '/api/content/importURL');
 // Redirect deprecated moving UI endpoints
 redirect('/savemovingui', '/api/moving-ui/save');
 
+// Redirect Serp endpoints
+redirect('/api/serpapi/search', '/api/search/serpapi');
+redirect('/api/serpapi/visit', '/api/search/visit');
+redirect('/api/serpapi/transcript', '/api/search/transcript');
+
 // Moving UI
 app.use('/api/moving-ui', require('./src/endpoints/moving-ui').router);
 
@@ -498,8 +504,8 @@ app.use('/api/extra/classify', require('./src/endpoints/classify').router);
 // Image captioning
 app.use('/api/extra/caption', require('./src/endpoints/caption').router);
 
-// Web search extension
-app.use('/api/serpapi', require('./src/endpoints/serpapi').router);
+// Web search and scraping
+app.use('/api/search', require('./src/endpoints/search').router);
 
 // The different text generation APIs
 
@@ -517,6 +523,9 @@ app.use('/api/backends/scale-alt', require('./src/endpoints/backends/scale-alt')
 
 // Speech (text-to-speech and speech-to-text)
 app.use('/api/speech', require('./src/endpoints/speech').router);
+
+// Azure TTS
+app.use('/api/azure', require('./src/endpoints/azure').router);
 
 const tavernUrl = new URL(
     (cliArguments.ssl ? 'https://' : 'http://') +

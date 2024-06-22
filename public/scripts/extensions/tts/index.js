@@ -1,4 +1,4 @@
-import { callPopup, cancelTtsPlay, eventSource, event_types, name2, saveSettingsDebounced, substituteParams } from '../../../script.js';
+import { callPopup, cancelTtsPlay, eventSource, event_types, isStreamingEnabled, name2, saveSettingsDebounced, substituteParams } from '../../../script.js';
 import { ModuleWorkerWrapper, doExtrasFetch, extension_settings, getApiUrl, getContext, modules } from '../../extensions.js';
 import { delay, escapeRegex, getBase64Async, getStringHash, onlyUnique } from '../../utils.js';
 import { EdgeTtsProvider } from './edge.js';
@@ -8,11 +8,17 @@ import { CoquiTtsProvider } from './coqui.js';
 import { SystemTtsProvider } from './system.js';
 import { NovelTtsProvider } from './novel.js';
 import { power_user } from '../../power-user.js';
-import { registerSlashCommand } from '../../slash-commands.js';
 import { OpenAITtsProvider } from './openai.js';
 import { XTTSTtsProvider } from './xtts.js';
+import { GSVITtsProvider } from './gsvi.js';
+import { SBVits2TtsProvider } from './sbvits2.js';
 import { AllTalkTtsProvider } from './alltalk.js';
 import { SpeechT5TtsProvider } from './speecht5.js';
+import { AzureTtsProvider } from './azure.js';
+import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
+import { SlashCommand } from '../../slash-commands/SlashCommand.js';
+import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../slash-commands/SlashCommandArgument.js';
+import { debounce_timeout } from '../../constants.js';
 export { talkingAnimation };
 
 const UPDATE_INTERVAL = 1000;
@@ -23,6 +29,8 @@ let talkingHeadState = false;
 let lastChatId = null;
 let lastMessage = null;
 let lastMessageHash = null;
+let periodicMessageGenerationTimer = null;
+let lastPositionOfParagraphEnd = -1;
 
 const DEFAULT_VOICE_MARKER = '[Default Voice]';
 const DISABLED_VOICE_MARKER = 'disabled';
@@ -72,6 +80,8 @@ const ttsProviders = {
     ElevenLabs: ElevenLabsTtsProvider,
     Silero: SileroTtsProvider,
     XTTSv2: XTTSTtsProvider,
+    GSVI: GSVITtsProvider,
+    SBVits2: SBVits2TtsProvider,
     System: SystemTtsProvider,
     Coqui: CoquiTtsProvider,
     Edge: EdgeTtsProvider,
@@ -79,6 +89,7 @@ const ttsProviders = {
     OpenAI: OpenAITtsProvider,
     AllTalk: AllTalkTtsProvider,
     SpeechT5: SpeechT5TtsProvider,
+    Azure: AzureTtsProvider,
 };
 let ttsProvider;
 let ttsProviderName;
@@ -101,7 +112,7 @@ async function onNarrateOneMessage() {
 
 async function onNarrateText(args, text) {
     if (!text) {
-        return;
+        return '';
     }
 
     audioElement.src = '/sounds/silence.mp3';
@@ -127,6 +138,7 @@ async function onNarrateText(args, text) {
 
     // Return back to the chat voices
     await initVoiceMap(false);
+    return '';
 }
 
 async function moduleWorker() {
@@ -259,6 +271,7 @@ async function playAudioData(audioJob) {
     audioElement.addEventListener('ended', completeCurrentAudioJob);
     audioElement.addEventListener('canplay', () => {
         console.debug('Starting TTS playback');
+        audioElement.playbackRate = extension_settings.tts.playback_rate;
         audioElement.play();
     });
 }
@@ -522,11 +535,16 @@ function loadSettings() {
     $('#tts_narrate_dialogues').prop('checked', extension_settings.tts.narrate_dialogues_only);
     $('#tts_narrate_quoted').prop('checked', extension_settings.tts.narrate_quoted_only);
     $('#tts_auto_generation').prop('checked', extension_settings.tts.auto_generation);
+    $('#tts_periodic_auto_generation').prop('checked', extension_settings.tts.periodic_auto_generation);
     $('#tts_narrate_translated_only').prop('checked', extension_settings.tts.narrate_translated_only);
     $('#tts_narrate_user').prop('checked', extension_settings.tts.narrate_user);
     $('#tts_pass_asterisks').prop('checked', extension_settings.tts.pass_asterisks);
     $('#tts_skip_codeblocks').prop('checked', extension_settings.tts.skip_codeblocks);
     $('#tts_skip_tags').prop('checked', extension_settings.tts.skip_tags);
+    $('#playback_rate').val(extension_settings.tts.playback_rate);
+    $('#playback_rate_counter').val(Number(extension_settings.tts.playback_rate).toFixed(2));
+    $('#playback_rate_block').toggle(extension_settings.tts.currentProvider !== 'System');
+
     $('body').toggleClass('tts', extension_settings.tts.enabled);
 }
 
@@ -536,6 +554,7 @@ const defaultSettings = {
     currentProvider: 'ElevenLabs',
     auto_generation: true,
     narrate_user: false,
+    playback_rate: 1,
 };
 
 function setTtsStatus(status, success) {
@@ -576,6 +595,12 @@ function onEnableClick() {
 
 function onAutoGenerationClick() {
     extension_settings.tts.auto_generation = !!$('#tts_auto_generation').prop('checked');
+    saveSettingsDebounced();
+}
+
+
+function onPeriodicAutoGenerationClick() {
+    extension_settings.tts.periodic_auto_generation = !!$('#tts_periodic_auto_generation').prop('checked');
     saveSettingsDebounced();
 }
 
@@ -647,6 +672,7 @@ async function loadTtsProvider(provider) {
 function onTtsProviderChange() {
     const ttsProviderSelection = $('#tts_provider').val();
     extension_settings.tts.currentProvider = ttsProviderSelection;
+    $('#playback_rate_block').toggle(extension_settings.tts.currentProvider !== 'System');
     loadTtsProvider(ttsProviderSelection);
 }
 
@@ -664,13 +690,14 @@ export function saveTtsProviderSettings() {
 //###################//
 
 async function onChatChanged() {
-    await resetTtsPlayback();
+    await onGenerationEnded();
+    resetTtsPlayback();
     const voiceMapInit = initVoiceMap();
-    await Promise.race([voiceMapInit, delay(1000)]);
+    await Promise.race([voiceMapInit, delay(debounce_timeout.relaxed)]);
     lastMessage = null;
 }
 
-async function onMessageEvent(messageId) {
+async function onMessageEvent(messageId, lastCharIndex) {
     // If TTS is disabled, do nothing
     if (!extension_settings.tts.enabled) {
         return;
@@ -708,12 +735,17 @@ async function onMessageEvent(messageId) {
         return;
     }
 
+    // if we only want to process part of the message
+    if (lastCharIndex) {
+        message.mes = message.mes.substring(0, lastCharIndex);
+    }
+
     const isLastMessageInCurrent = () =>
         lastMessage &&
         typeof lastMessage === 'object' &&
         message.swipe_id === lastMessage.swipe_id &&
-        message.name === lastMessage.name  &&
-        message.is_user === lastMessage.is_user  &&
+        message.name === lastMessage.name &&
+        message.is_user === lastMessage.is_user &&
         message.mes.indexOf(lastMessage.mes) !== -1;
 
     // if last message within current message, message got extended. only send diff to TTS.
@@ -764,6 +796,83 @@ async function onMessageDeleted() {
 
     // stop any tts playback since message might not exist anymore
     resetTtsPlayback();
+}
+
+async function onGenerationStarted(generationType, _args, isDryRun) {
+    // If dry running or quiet mode, do nothing
+    if (isDryRun || ['quiet', 'impersonate'].includes(generationType)) {
+        return;
+    }
+
+    // If TTS is disabled, do nothing
+    if (!extension_settings.tts.enabled) {
+        return;
+    }
+
+    // Auto generation is disabled
+    if (!extension_settings.tts.auto_generation) {
+        return;
+    }
+
+    // Periodic auto generation is disabled
+    if (!extension_settings.tts.periodic_auto_generation) {
+        return;
+    }
+
+    // If the reply is not being streamed
+    if (!isStreamingEnabled()) {
+        return;
+    }
+
+    // start the timer
+    if (!periodicMessageGenerationTimer) {
+        periodicMessageGenerationTimer = setInterval(onPeriodicMessageGenerationTick, UPDATE_INTERVAL);
+    }
+}
+
+async function onGenerationEnded() {
+    if (periodicMessageGenerationTimer) {
+        clearInterval(periodicMessageGenerationTimer);
+        periodicMessageGenerationTimer = null;
+    }
+    lastPositionOfParagraphEnd = -1;
+}
+
+async function onPeriodicMessageGenerationTick() {
+    const context = getContext();
+
+    // no characters or group selected
+    if (!context.groupId && context.characterId === undefined) {
+        return;
+    }
+
+    const lastMessageId = context.chat.length - 1;
+
+    // the last message was from the user
+    if (context.chat[lastMessageId].is_user) {
+        return;
+    }
+
+    const lastMessage = structuredClone(context.chat[lastMessageId]);
+    const lastMessageText = lastMessage?.mes ?? '';
+
+    // look for double ending lines which should indicate the end of a paragraph
+    let newLastPositionOfParagraphEnd = lastMessageText
+        .indexOf('\n\n', lastPositionOfParagraphEnd + 1);
+    // if not found, look for a single ending line which should indicate the end of a paragraph
+    if (newLastPositionOfParagraphEnd === -1) {
+        newLastPositionOfParagraphEnd = lastMessageText
+            .indexOf('\n', lastPositionOfParagraphEnd + 1);
+    }
+
+    // send the message to the tts module if we found the new end of a paragraph
+    if (newLastPositionOfParagraphEnd > -1) {
+        onMessageEvent(lastMessageId, newLastPositionOfParagraphEnd);
+
+        if (periodicMessageGenerationTimer) {
+            lastPositionOfParagraphEnd = newLastPositionOfParagraphEnd;
+        }
+    }
 }
 
 /**
@@ -995,6 +1104,10 @@ $(document).ready(function () {
                             <input type="checkbox" id="tts_auto_generation">
                             <small>Auto Generation</small>
                         </label>
+                        <label class="checkbox_label" for="tts_periodic_auto_generation" title="Requires auto generation to be enabled.">
+                            <input type="checkbox" id="tts_periodic_auto_generation">
+                            <small>Narrate by paragraphs (when streaming)</small>
+                        </label>
                         <label class="checkbox_label" for="tts_narrate_quoted">
                             <input type="checkbox" id="tts_narrate_quoted">
                             <small>Only narrate "quotes"</small>
@@ -1020,6 +1133,20 @@ $(document).ready(function () {
                         <small>Pass Asterisks to TTS Engine</small>
                         </label>
                     </div>
+                    <div id="playback_rate_block" class="range-block">
+                        <hr>
+                        <div class="range-block-title justifyLeft" data-i18n="Audio Playback Speed">
+                            <small>Audio Playback Speed</small>
+                        </div>
+                        <div class="range-block-range-and-counter">
+                            <div class="range-block-range">
+                                <input type="range" id="playback_rate" name="volume" min="0" max="3" step="0.05">
+                            </div>
+                            <div class="range-block-counter">
+                                <input type="number" min="0" max="3" step="0.05" data-for="playback_rate" id="playback_rate_counter">
+                            </div>
+                        </div>
+                    </div>
                     <div id="tts_voicemap_block">
                     </div>
                     <hr>
@@ -1043,7 +1170,17 @@ $(document).ready(function () {
         $('#tts_skip_tags').on('click', onSkipTagsClick);
         $('#tts_pass_asterisks').on('click', onPassAsterisksClick);
         $('#tts_auto_generation').on('click', onAutoGenerationClick);
+        $('#tts_periodic_auto_generation').on('click', onPeriodicAutoGenerationClick);
         $('#tts_narrate_user').on('click', onNarrateUserClick);
+
+        $('#playback_rate').on('input', function () {
+            const value = $(this).val();
+            const formattedValue = Number(value).toFixed(2);
+            extension_settings.tts.playback_rate = value;
+            $('#playback_rate_counter').val(formattedValue);
+            saveSettingsDebounced();
+        });
+
         $('#tts_voices').on('click', onTtsVoicesClick);
         for (const provider in ttsProviders) {
             $('#tts_provider').append($('<option />').val(provider).text(provider));
@@ -1061,8 +1198,41 @@ $(document).ready(function () {
     eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
     eventSource.on(event_types.MESSAGE_DELETED, onMessageDeleted);
     eventSource.on(event_types.GROUP_UPDATED, onChatChanged);
-    eventSource.on(event_types.MESSAGE_SENT, onMessageEvent);
-    eventSource.on(event_types.MESSAGE_RECEIVED, onMessageEvent);
-    registerSlashCommand('speak', onNarrateText, ['narrate', 'tts'], '<span class="monospace">(text)</span>  – narrate any text using currently selected character\'s voice. Use voice="Character Name" argument to set other voice from the voice map, example: <tt>/speak voice="Donald Duck" Quack!</tt>', true, true);
+    eventSource.on(event_types.GENERATION_STARTED, onGenerationStarted);
+    eventSource.on(event_types.GENERATION_ENDED, onGenerationEnded);
+    eventSource.makeLast(event_types.CHARACTER_MESSAGE_RENDERED, onMessageEvent);
+    eventSource.makeLast(event_types.USER_MESSAGE_RENDERED, onMessageEvent);
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'speak',
+        callback: onNarrateText,
+        aliases: ['narrate', 'tts'],
+        namedArgumentList: [
+            new SlashCommandNamedArgument(
+                'voice', 'character voice name', [ARGUMENT_TYPE.STRING], false,
+            ),
+        ],
+        unnamedArgumentList: [
+            new SlashCommandArgument(
+                'text', [ARGUMENT_TYPE.STRING], true,
+            ),
+        ],
+        helpString: `
+            <div>
+                Narrate any text using currently selected character's voice.
+            </div>
+            <div>
+                Use <code>voice="Character Name"</code> argument to set other voice from the voice map.
+            </div>
+            <div>
+                <strong>Example:</strong>
+                <ul>
+                    <li>
+                        <pre><code>/speak voice="Donald Duck" Quack!</code></pre>
+                    </li>
+                </ul>
+            </div>
+        `,
+    }));
+
     document.body.appendChild(audioElement);
 });

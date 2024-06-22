@@ -1,11 +1,13 @@
 import { getBase64Async, isTrueBoolean, saveBase64AsFile } from '../../utils.js';
-import { getContext, getApiUrl, doExtrasFetch, extension_settings, modules } from '../../extensions.js';
-import { callPopup, getRequestHeaders, saveSettingsDebounced, substituteParams } from '../../../script.js';
+import { getContext, getApiUrl, doExtrasFetch, extension_settings, modules, renderExtensionTemplateAsync } from '../../extensions.js';
+import { callPopup, getRequestHeaders, saveSettingsDebounced, substituteParamsExtended } from '../../../script.js';
 import { getMessageTimeStamp } from '../../RossAscends-mods.js';
 import { SECRET_KEYS, secret_state } from '../../secrets.js';
 import { getMultimodalCaption } from '../shared.js';
 import { textgen_types, textgenerationwebui_settings } from '../../textgen-settings.js';
-import { registerSlashCommand } from '../../slash-commands.js';
+import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
+import { SlashCommand } from '../../slash-commands/SlashCommand.js';
+import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../slash-commands/SlashCommandArgument.js';
 export { MODULE_NAME };
 
 const MODULE_NAME = 'caption';
@@ -93,7 +95,7 @@ async function sendCaptionedMessage(caption, image) {
         template += ' {{caption}}';
     }
 
-    let messageText = substituteParams(template).replace(/{{caption}}/i, caption);
+    let messageText = substituteParamsExtended(template, { caption: caption });
 
     if (extension_settings.caption.refine_mode) {
         messageText = await callPopup(
@@ -254,6 +256,19 @@ async function onSelectImage(e, prompt, quiet) {
         return '';
     }
 
+    const caption = await getCaptionForFile(file, prompt, quiet);
+    form && form.reset();
+    return caption;
+}
+
+/**
+ * Gets a caption for an image file.
+ * @param {File} file Input file
+ * @param {string} prompt Caption prompt
+ * @param {boolean} quiet Suppresses sending a message
+ * @returns {Promise<string>} Generated caption
+ */
+async function getCaptionForFile(file, prompt, quiet) {
     try {
         setSpinnerIcon();
         const context = getContext();
@@ -273,7 +288,6 @@ async function onSelectImage(e, prompt, quiet) {
         return '';
     }
     finally {
-        form && form.reset();
         setImageIcon();
     }
 }
@@ -288,9 +302,26 @@ function onRefineModeInput() {
  * @param {object} args Named parameters
  * @param {string} prompt Caption prompt
  */
-function captionCommandCallback(args, prompt) {
+async function captionCommandCallback(args, prompt) {
+    const quiet = isTrueBoolean(args?.quiet);
+    const id = args?.id;
+
+    if (!isNaN(Number(id))) {
+        const message = getContext().chat[id];
+        if (message?.extra?.image) {
+            try {
+                const fetchResult = await fetch(message.extra.image);
+                const blob = await fetchResult.blob();
+                const file = new File([blob], 'image.jpg', { type: blob.type });
+                return await getCaptionForFile(file, prompt, quiet);
+            } catch (error) {
+                toastr.error('Failed to get image from the message. Make sure the image is accessible.');
+                return '';
+            }
+        }
+    }
+
     return new Promise(resolve => {
-        const quiet = isTrueBoolean(args?.quiet);
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
@@ -303,7 +334,7 @@ function captionCommandCallback(args, prompt) {
     });
 }
 
-jQuery(function () {
+jQuery(async function () {
     function addSendPictureButton() {
         const sendButton = $(`
         <div id="send_picture" class="list-group-item flex-container flexGap5">
@@ -317,8 +348,8 @@ jQuery(function () {
                 (modules.includes('caption') && extension_settings.caption.source === 'extras') ||
                 (extension_settings.caption.source === 'multimodal' && extension_settings.caption.multimodal_api === 'openai' && (secret_state[SECRET_KEYS.OPENAI] || extension_settings.caption.allow_reverse_proxy)) ||
                 (extension_settings.caption.source === 'multimodal' && extension_settings.caption.multimodal_api === 'openrouter' && secret_state[SECRET_KEYS.OPENROUTER]) ||
-                (extension_settings.caption.source === 'multimodal' && extension_settings.caption.multimodal_api === 'google' && secret_state[SECRET_KEYS.MAKERSUITE]) ||
-                (extension_settings.caption.source === 'multimodal' && extension_settings.caption.multimodal_api === 'anthropic' && secret_state[SECRET_KEYS.CLAUDE]) ||
+                (extension_settings.caption.source === 'multimodal' && extension_settings.caption.multimodal_api === 'google' && (secret_state[SECRET_KEYS.MAKERSUITE] || extension_settings.caption.allow_reverse_proxy)) ||
+                (extension_settings.caption.source === 'multimodal' && extension_settings.caption.multimodal_api === 'anthropic' && (secret_state[SECRET_KEYS.CLAUDE] || extension_settings.caption.allow_reverse_proxy)) ||
                 (extension_settings.caption.source === 'multimodal' && extension_settings.caption.multimodal_api === 'ollama' && textgenerationwebui_settings.server_urls[textgen_types.OLLAMA]) ||
                 (extension_settings.caption.source === 'multimodal' && extension_settings.caption.multimodal_api === 'llamacpp' && textgenerationwebui_settings.server_urls[textgen_types.LLAMACPP]) ||
                 (extension_settings.caption.source === 'multimodal' && extension_settings.caption.multimodal_api === 'ooba' && textgenerationwebui_settings.server_urls[textgen_types.OOBA]) ||
@@ -368,95 +399,12 @@ jQuery(function () {
             saveSettingsDebounced();
         });
     }
-    function addSettings() {
-        const html = `
-        <div class="caption_settings">
-            <div class="inline-drawer">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Image Captioning</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-                    <label for="caption_source">Source</label>
-                    <select id="caption_source" class="text_pole">
-                        <option value="local">Local</option>
-                        <option value="multimodal">Multimodal (OpenAI / Anthropic / llama / Google)</option>
-                        <option value="extras">Extras</option>
-                        <option value="horde">Horde</option>
-                    </select>
-                    <div id="caption_multimodal_block" class="flex-container wide100p">
-                        <div class="flex1 flex-container flexFlowColumn flexNoGap">
-                            <label for="caption_multimodal_api">API</label>
-                            <select id="caption_multimodal_api" class="flex1 text_pole">
-                                <option value="anthropic">Anthropic</option>
-                                <option value="custom">Custom (OpenAI-compatible)</option>
-                                <option value="google">Google MakerSuite</option>
-                                <option value="koboldcpp">KoboldCpp</option>
-                                <option value="llamacpp">llama.cpp</option>
-                                <option value="ollama">Ollama</option>
-                                <option value="openai">OpenAI</option>
-                                <option value="openrouter">OpenRouter</option>
-                                <option value="ooba">Text Generation WebUI (oobabooga)</option>
-                            </select>
-                        </div>
-                        <div class="flex1 flex-container flexFlowColumn flexNoGap">
-                            <label for="caption_multimodal_model">Model</label>
-                            <select id="caption_multimodal_model" class="flex1 text_pole">
-                                <option data-type="openai" value="gpt-4-vision-preview">gpt-4-vision-preview</option>
-                                <option data-type="openai" value="gpt-4-turbo">gpt-4-turbo</option>
-                                <option data-type="anthropic" value="claude-3-opus-20240229">claude-3-opus-20240229</option>
-                                <option data-type="anthropic" value="claude-3-sonnet-20240229">claude-3-sonnet-20240229</option>
-                                <option data-type="anthropic" value="claude-3-haiku-20240307">claude-3-haiku-20240307</option>
-                                <option data-type="google" value="gemini-pro-vision">gemini-pro-vision</option>
-                                <option data-type="openrouter" value="openai/gpt-4-vision-preview">openai/gpt-4-vision-preview</option>
-                                <option data-type="openrouter" value="haotian-liu/llava-13b">haotian-liu/llava-13b</option>
-                                <option data-type="openrouter" value="anthropic/claude-3-haiku">anthropic/claude-3-haiku</option>
-                                <option data-type="openrouter" value="anthropic/claude-3-sonnet">anthropic/claude-3-sonnet</option>
-                                <option data-type="openrouter" value="anthropic/claude-3-opus">anthropic/claude-3-opus</option>
-                                <option data-type="openrouter" value="anthropic/claude-3-haiku:beta">anthropic/claude-3-haiku:beta</option>
-                                <option data-type="openrouter" value="anthropic/claude-3-sonnet:beta">anthropic/claude-3-sonnet:beta</option>
-                                <option data-type="openrouter" value="anthropic/claude-3-opus:beta">anthropic/claude-3-opus:beta</option>
-                                <option data-type="openrouter" value="nousresearch/nous-hermes-2-vision-7b">nousresearch/nous-hermes-2-vision-7b</option>
-                                <option data-type="openrouter" value="google/gemini-pro-vision">google/gemini-pro-vision</option>
-                                <option data-type="ollama" value="ollama_current">[Currently selected]</option>
-                                <option data-type="ollama" value="bakllava:latest">bakllava:latest</option>
-                                <option data-type="ollama" value="llava:latest">llava:latest</option>
-                                <option data-type="llamacpp" value="llamacpp_current">[Currently loaded]</option>
-                                <option data-type="ooba" value="ooba_current">[Currently loaded]</option>
-                                <option data-type="koboldcpp" value="koboldcpp_current">[Currently loaded]</option>
-                                <option data-type="custom" value="custom_current">[Currently selected]</option>
-                            </select>
-                        </div>
-                        <label data-type="openai,anthropic" class="checkbox_label flexBasis100p" for="caption_allow_reverse_proxy" title="Allow using reverse proxy if defined and valid.">
-                            <input id="caption_allow_reverse_proxy" type="checkbox" class="checkbox">
-                            Allow reverse proxy
-                        </label>
-                        <div class="flexBasis100p m-b-1">
-                            <small><b>Hint:</b> Set your API keys and endpoints in the 'API Connections' tab first.</small>
-                        </div>
-                    </div>
-                    <div id="caption_prompt_block">
-                        <label for="caption_prompt">Caption Prompt</label>
-                        <textarea id="caption_prompt" class="text_pole" rows="1" placeholder="&lt; Use default &gt;">${PROMPT_DEFAULT}</textarea>
-                        <label class="checkbox_label margin-bot-10px" for="caption_prompt_ask" title="Ask for a custom prompt every time an image is captioned.">
-                            <input id="caption_prompt_ask" type="checkbox" class="checkbox">
-                            Ask every time
-                        </label>
-                    </div>
-                    <label for="caption_template">Message Template <small>(use <code>{{caption}}</code> macro)</small></label>
-                    <textarea id="caption_template" class="text_pole" rows="2" placeholder="&lt; Use default &gt;">${TEMPLATE_DEFAULT}</textarea>
-                    <label class="checkbox_label margin-bot-10px" for="caption_refine_mode">
-                        <input id="caption_refine_mode" type="checkbox" class="checkbox">
-                        Edit captions before saving
-                    </label>
-                </div>
-            </div>
-        </div>
-        `;
+    async function addSettings() {
+        const html = await renderExtensionTemplateAsync('caption', 'settings');
         $('#extensions_settings2').append(html);
     }
 
-    addSettings();
+    await addSettings();
     addPictureSendForm();
     addSendPictureButton();
     setImageIcon();
@@ -492,5 +440,35 @@ jQuery(function () {
         saveSettingsDebounced();
     });
 
-    registerSlashCommand('caption', captionCommandCallback, [], '<span class="monospace">quiet=true/false [prompt]</span> - caption an image with an optional prompt and passes the caption down the pipe. Only multimodal sources support custom prompts. Set the "quiet" argument to true to suppress sending a captioned message, default: false.', true, true);
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'caption',
+        callback: captionCommandCallback,
+        returns: 'caption',
+        namedArgumentList: [
+            new SlashCommandNamedArgument(
+                'quiet', 'suppress sending a captioned message', [ARGUMENT_TYPE.BOOLEAN], false, false, 'false', ['true', 'false'],
+            ),
+            new SlashCommandNamedArgument(
+                'id', 'get image from a message with this ID', [ARGUMENT_TYPE.NUMBER], false, false,
+            ),
+        ],
+        unnamedArgumentList: [
+            new SlashCommandArgument(
+                'prompt', [ARGUMENT_TYPE.STRING], false,
+            ),
+        ],
+        helpString: `
+            <div>
+                Caption an image with an optional prompt and passes the caption down the pipe.
+            </div>
+            <div>
+                Only multimodal sources support custom prompts.
+            </div>
+            <div>
+                Provide a message ID to get an image from a message instead of uploading one.
+            </div>
+            <div>
+                Set the "quiet" argument to true to suppress sending a captioned message, default: false.
+            </div>
+        `,
+    }));
 });

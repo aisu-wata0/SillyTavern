@@ -144,12 +144,14 @@ A full list of included extensions and tutorials on how to use them can be found
   8. The server will then start, and SillyTavern will pop up in your browser.
 
 ## Installing via SillyTavern Launcher
- 1. Install [Git for Windows](https://gitforwindows.org/)
- 2. Open Windows Explorer (`Win+E`) and make or choose a folder where you wanna install the launcher to
- 3. Open a Command Prompt inside that folder by clicking in the 'Address Bar' at the top, typing `cmd`, and pressing Enter.
- 4. When you see a black box, insert the following command: `git clone https://github.com/SillyTavern/SillyTavern-Launcher.git`
- 5. Double-click on `installer.bat` and choose what you wanna install
- 6. After installation double-click on `launcher.bat`
+1.  On your keyboard: press **`WINDOWS + R`** to open Run dialog box. Then, run the following command to install git:
+```shell
+cmd /c winget install -e --id Git.Git
+```
+2. On your keyboard: press **`WINDOWS + E`** to open File Explorer, then navigate to the folder where you want to install the launcher. Once in the desired folder, type `cmd` into the address bar and press enter. Then, run the following command:
+```shell
+git clone https://github.com/SillyTavern/SillyTavern-Launcher.git && cd SillyTavern-Launcher && start installer.bat
+```
 
 ## Installing via GitHub Desktop
 (This allows git usage **only** in GitHub Desktop, if you want to use `git` on the command line too, you also need to install [Git for Windows](https://gitforwindows.org/))
@@ -183,18 +185,79 @@ For MacOS / Linux all of these will be done in a Terminal.
 
 ### For Linux users
 1. Open your favorite terminal and install git
-2. Download Sillytavern Launcher with: `git clone https://github.com/SillyTavern/SillyTavern-Launcher.git`
-3. Navigate to the SillyTavern-Launcher with: `cd SillyTavern-Launcher`
-4. Start the install launcher with: `chmod +x install.sh && ./install.sh` and choose what you wanna install
-5. After installation start the launcher with: `chmod +x launcher.sh && ./launcher.sh`
+2. Git clone the Sillytavern-Launcher with: 
+```shell
+git clone https://github.com/SillyTavern/SillyTavern-Launcher.git && cd SillyTavern-Launcher
+```
+3. Start the installer.sh with: 
+```shell
+chmod +x install.sh && ./install.sh
+```
+4. After installation start the launcher.sh with: 
+```shell
+chmod +x launcher.sh && ./launcher.sh
+```
 
 ### For Mac users
-1. Open a terminal and install brew with: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
-2. Then install git with: `brew install git`
-3. Download Sillytavern Launcher with: `git clone https://github.com/SillyTavern/SillyTavern-Launcher.git`
-4. Navigate to the SillyTavern-Launcher with: `cd SillyTavern-Launcher`
-5. Start the install launcher with: `chmod +x install.sh && ./install.sh` and choose what you wanna install
-6. After installation start the launcher with: `chmod +x launcher.sh && ./launcher.sh`
+1. Open a terminal and install brew with: 
+```shell
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+2. Install git with: 
+```shell
+brew install git
+```
+3. Git clone the Sillytavern-Launcher with: 
+```shell
+git clone https://github.com/SillyTavern/SillyTavern-Launcher.git && cd SillyTavern-Launcher
+```
+4. Start the installer.sh with: 
+```shell
+chmod +x install.sh && ./install.sh
+```
+5. After installation start the launcher.sh with: 
+```shell
+chmod +x launcher.sh && ./launcher.sh
+```
+
+## 🐋 Installing via Docker
+
+These instructions assume you have installed Docker, are able to access your command line for the installation of containers, and familiar with their general operation.
+
+### Building the image yourself
+
+We have a comprehensive guide on using SillyTavern in Docker [here](http://docs.sillytavern.app/installation/docker/) which covers installations on Windows, macOS and Linux! Give it a read if you wish to build the image yourself.
+
+### Using the GitHub Container Registry (easiest)
+
+You will need two mandatory directory mappings and a port mapping to allow SillyTavern to function. In the command, replace your selections in the following places:
+
+#### Container Variables
+
+##### Volume Mappings
+
+- [config] - The directory where SillyTavern configuration files will be stored on your host machine
+- [data] - The directory where SillyTavern user data (including characters) will be stored on your host machine
+- [plugins] - (optional) The directory where SillyTavern server plugins will be stored on your host machine
+
+##### Port Mappings
+
+- [PublicPort] - The port to expose the traffic on. This is mandatory, as you will be accessing the instance from outside of its virtual machine container. DO NOT expose this to the internet without implementing a separate service for security.
+
+##### Additional Settings
+
+- [TimeZone] - The timezone your instance should use. This is useful for making logs match your local time for easier troubleshooting. Use your TZ Identifier. (https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)
+- [DockerNet] - The docker network that the container should be created with a connection to. If you don't know what it is, see the [official Docker documentation](https://docs.docker.com/reference/cli/docker/network/).
+- [version] - On the right-hand side of this GitHub page, you'll see "Packages". Select the "sillytavern" package and you'll see the image versions. The image tag "latest" will keep you up-to-date with the current release. You can also utilize "staging" and "release" tags that point to the nightly images of the respective branches, but this may not be appropriate, if you are utilizing extensions that could be broken, and may need time to update.
+
+#### Install command
+
+1. Open your Command Line
+2. Run the following command
+
+`docker create --name='sillytavern' --net='[DockerNet]' -e TZ="[TimeZone]" -p '8000:8000/tcp' -v '[plugins]':'/home/node/app/plugins':'rw' -v '[config]':'/home/node/app/config':'rw' -v '[data]':'/home/node/app/data':'rw' 'ghcr.io/sillytavern/sillytavern:[version]'`
+
+> Note that 8000 is a default listening port. Don't forget to use an appropriate port if you change it in the config.
 
 ## 📱 Mobile - Installing via termux
 
@@ -205,7 +268,7 @@ For MacOS / Linux all of these will be done in a Terminal.
 
 ## API keys management
 
-SillyTavern saves your API keys to a `secrets.json` file in the server directory.
+SillyTavern saves your API keys to a `secrets.json` file in the user data directory (`/data/default-user/secrets.json` is the default path).
 
 By default, they will not be exposed to a frontend after you enter them and reload the page.
 
@@ -220,7 +283,7 @@ Most often this is for people who want to use SillyTavern on their mobile phones
 
 However, it can be used to allow remote connections from anywhere as well.
 
-**IMPORTANT: SillyTavern is a single-user program, so anyone who logs in will be able to see all characters and chats, and be able to change any settings inside the UI.**
+**IMPORTANT: Refer to the official guide if you want to configure SillyTavern user accounts with (optional) password protection: [Users](https://docs.sillytavern.app/installation/st-1.12.0-migration-guide/#users).**
 
 ### 1. Managing whitelisted IPs
 
@@ -326,7 +389,7 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU Affero General Public License for more details.**
 
-* TAI Base by Humi: Unknown license
+* TAI Base by Humi: MIT
 * Cohee's modifications and derived code: AGPL v3
 * RossAscends' additions: AGPL v3
 * Portions of CncAnon's TavernAITurbo mod: Unknown license
@@ -347,6 +410,7 @@ GNU Affero General Public License for more details.**
 * Korean translation by @doloroushyeonse
 * k_euler_a support for Horde by <https://github.com/Teashrock>
 * Chinese translation by [@XXpE3](https://github.com/XXpE3), 中文 ISSUES 可以联系 @XXpE3
+* Docker guide by [@mrguymiah](https://github.com/mrguymiah) and [@Bronya-Rand](https://github.com/Bronya-Rand)
 
 <!-- LINK GROUP -->
 [back-to-top]: https://img.shields.io/badge/-BACK_TO_TOP-151515?style=flat-square

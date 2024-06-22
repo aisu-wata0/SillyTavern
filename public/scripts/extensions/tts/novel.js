@@ -180,6 +180,7 @@ class NovelTtsProvider {
         const url = URL.createObjectURL(audio);
         this.audioElement.src = url;
         this.audioElement.play();
+        this.audioElement.onended = () => URL.revokeObjectURL(url);
     }
 
     async* fetchTtsGeneration(inputText, voiceId) {

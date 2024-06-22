@@ -2,6 +2,7 @@ require('./polyfill.js');
 
 /**
  * Convert a prompt from the ChatML objects to the format used by Claude.
+ * Mainly deprecated. Only used for counting tokens.
  * @param {object[]} messages Array of messages
  * @param {boolean}  addAssistantPostfix Add Assistant postfix.
  * @param {string}   addAssistantPrefill Add Assistant prefill after the assistant postfix.
@@ -262,8 +263,14 @@ function convertGooglePrompt(messages, model, useSysPrompt = false, charName = '
     const PNG_PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
     const visionSupportedModels = [
-        'gemini-1.0-pro-vision-latest',
+        'gemini-1.5-flash-latest',
         'gemini-1.5-pro-latest',
+        'gemini-1.0-pro-vision-latest',
+        'gemini-pro-vision',
+    ];
+
+    const dummyRequiredModels = [
+        'gemini-1.0-pro-vision-latest',
         'gemini-pro-vision',
     ];
 
@@ -342,7 +349,7 @@ function convertGooglePrompt(messages, model, useSysPrompt = false, charName = '
     });
 
     // pro 1.5 doesn't require a dummy image to be attached, other vision models do
-    if (isMultimodal && model !== 'gemini-1.5-pro-latest' && !hasImage) {
+    if (isMultimodal && dummyRequiredModels.includes(model) && !hasImage) {
         contents[0].parts.push({
             inlineData: {
                 mimeType: 'image/png',
@@ -352,6 +359,71 @@ function convertGooglePrompt(messages, model, useSysPrompt = false, charName = '
     }
 
     return { contents: contents, system_instruction: system_instruction };
+}
+
+/**
+ * Convert a prompt from the ChatML objects to the format used by MistralAI.
+ * @param {object[]} messages Array of messages
+ * @param {string} model Model name
+ * @param {string} charName Character name
+ * @param {string} userName User name
+ */
+function convertMistralMessages(messages, model, charName = '', userName = '') {
+    if (!Array.isArray(messages)) {
+        return [];
+    }
+
+    //large seems to be throwing a 500 error if we don't make the first message a user role, most likely a bug since the other models won't do this
+    if (model.includes('large')) {
+        messages[0].role = 'user';
+    }
+
+    //must send a user role as last message
+    const lastMsg = messages[messages.length - 1];
+    if (messages.length > 0 && lastMsg && (lastMsg.role === 'system' || lastMsg.role === 'assistant')) {
+        if (lastMsg.role === 'assistant' && lastMsg.name) {
+            lastMsg.content = lastMsg.name + ': ' + lastMsg.content;
+        } else if (lastMsg.role === 'system') {
+            lastMsg.content = '[INST] ' + lastMsg.content + ' [/INST]';
+        }
+        lastMsg.role = 'user';
+    }
+
+    //system prompts can be stacked at the start, but any futher sys prompts after the first user/assistant message will break the model
+    let encounteredNonSystemMessage = false;
+    messages.forEach(msg => {
+        if (msg.role === 'system' && msg.name === 'example_assistant') {
+            if (charName) {
+                msg.content = `${charName}: ${msg.content}`;
+            }
+            delete msg.name;
+        }
+
+        if (msg.role === 'system' && msg.name === 'example_user') {
+            if (userName) {
+                msg.content = `${userName}: ${msg.content}`;
+            }
+            delete msg.name;
+        }
+
+        if (msg.name) {
+            msg.content = `${msg.name}: ${msg.content}`;
+            delete msg.name;
+        }
+
+        if ((msg.role === 'user' || msg.role === 'assistant') && !encounteredNonSystemMessage) {
+            encounteredNonSystemMessage = true;
+        }
+
+        if (encounteredNonSystemMessage && msg.role === 'system') {
+            msg.role = 'user';
+            //unsure if the instruct version is what they've deployed on their endpoints and if this will make a difference or not.
+            //it should be better than just sending the message as a user role without context though
+            msg.content = '[INST] ' + msg.content + ' [/INST]';
+        }
+    });
+
+    return messages;
 }
 
 /**
@@ -379,10 +451,82 @@ function convertTextCompletionPrompt(messages) {
     return messageStrings.join('\n') + '\nassistant:';
 }
 
+/**
+ * Convert OpenAI Chat Completion tools to the format used by Cohere.
+ * @param {object[]} tools OpenAI Chat Completion tool definitions
+ */
+function convertCohereTools(tools) {
+    if (!Array.isArray(tools) || tools.length === 0) {
+        return [];
+    }
+
+    const jsonSchemaToPythonTypes = {
+        'string': 'str',
+        'number': 'float',
+        'integer': 'int',
+        'boolean': 'bool',
+        'array': 'list',
+        'object': 'dict',
+    };
+
+    const cohereTools = [];
+
+    for (const tool of tools) {
+        if (tool?.type !== 'function') {
+            console.log(`Unsupported tool type: ${tool.type}`);
+            continue;
+        }
+
+        const name = tool?.function?.name;
+        const description = tool?.function?.description;
+        const properties = tool?.function?.parameters?.properties;
+        const required = tool?.function?.parameters?.required;
+        const parameters = {};
+
+        if (!name) {
+            console.log('Tool name is missing');
+            continue;
+        }
+
+        if (!description) {
+            console.log('Tool description is missing');
+        }
+
+        if (!properties || typeof properties !== 'object') {
+            console.log(`No properties found for tool: ${tool?.function?.name}`);
+            continue;
+        }
+
+        for (const property in properties) {
+            const parameterDefinition = properties[property];
+            const description = parameterDefinition.description || (parameterDefinition.enum ? JSON.stringify(parameterDefinition.enum) : '');
+            const type = jsonSchemaToPythonTypes[parameterDefinition.type] || 'str';
+            const isRequired = Array.isArray(required) && required.includes(property);
+            parameters[property] = {
+                description: description,
+                type: type,
+                required: isRequired,
+            };
+        }
+
+        const cohereTool = {
+            name: tool.function.name,
+            description: tool.function.description,
+            parameter_definitions: parameters,
+        };
+
+        cohereTools.push(cohereTool);
+    }
+
+    return cohereTools;
+}
+
 module.exports = {
     convertClaudePrompt,
     convertClaudeMessages,
     convertGooglePrompt,
     convertTextCompletionPrompt,
     convertCohereMessages,
+    convertMistralMessages,
+    convertCohereTools,
 };

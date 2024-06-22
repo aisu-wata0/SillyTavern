@@ -41,6 +41,7 @@ const USER_DIRECTORY_TEMPLATE = Object.freeze({
     comfyWorkflows: 'user/workflows',
     files: 'user/files',
     vectors: 'vectors',
+    backups: 'backups',
 });
 
 /**
@@ -192,6 +193,7 @@ const CHAT_COMPLETION_SOURCES = {
     CUSTOM: 'custom',
     COHERE: 'cohere',
     PERPLEXITY: 'perplexity',
+    GROQ: 'groq',
 };
 
 const UPLOADS_PATH = './uploads';
@@ -200,6 +202,7 @@ const UPLOADS_PATH = './uploads';
 const TEXTGEN_TYPES = {
     OOBA: 'ooba',
     MANCER: 'mancer',
+    VLLM: 'vllm',
     APHRODITE: 'aphrodite',
     TABBY: 'tabby',
     KOBOLDCPP: 'koboldcpp',
@@ -296,6 +299,50 @@ const OPENROUTER_KEYS = [
     'stream',
     'prompt',
     'stop',
+    'provider',
+];
+
+// https://github.com/vllm-project/vllm/blob/0f8a91401c89ac0a8018def3756829611b57727f/vllm/entrypoints/openai/protocol.py#L220
+const VLLM_KEYS = [
+    'model',
+    'prompt',
+    'best_of',
+    'echo',
+    'frequency_penalty',
+    'logit_bias',
+    'logprobs',
+    'max_tokens',
+    'n',
+    'presence_penalty',
+    'seed',
+    'stop',
+    'stream',
+    'suffix',
+    'temperature',
+    'top_p',
+    'user',
+
+    'use_beam_search',
+    'top_k',
+    'min_p',
+    'repetition_penalty',
+    'length_penalty',
+    'early_stopping',
+    'stop_token_ids',
+    'ignore_eos',
+    'min_tokens',
+    'skip_special_tokens',
+    'spaces_between_special_tokens',
+    'truncate_prompt_tokens',
+
+    'include_stop_str_in_output',
+    'response_format',
+    'guided_json',
+    'guided_regex',
+    'guided_choice',
+    'guided_grammar',
+    'guided_decoding_backend',
+    'guided_whitespace_pattern',
 ];
 
 module.exports = {
@@ -318,4 +365,5 @@ module.exports = {
     DREAMGEN_KEYS,
     OPENROUTER_HEADERS,
     OPENROUTER_KEYS,
+    VLLM_KEYS,
 };

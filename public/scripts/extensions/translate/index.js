@@ -10,8 +10,11 @@ import {
     substituteParams,
     updateMessageBlock,
 } from '../../../script.js';
-import { extension_settings, getContext } from '../../extensions.js';
+import { extension_settings, getContext, renderExtensionTemplateAsync } from '../../extensions.js';
 import { findSecret, secret_state, writeSecret } from '../../secrets.js';
+import { SlashCommand } from '../../slash-commands/SlashCommand.js';
+import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../slash-commands/SlashCommandArgument.js';
+import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
 import { splitRecursive } from '../../utils.js';
 
 export const autoModeOptions = {
@@ -338,6 +341,34 @@ async function translateProviderBing(text, lang) {
 }
 
 /**
+ * Translates text using the Yandex Translate API
+ * @param {string} text Text to translate
+ * @param {string} lang Target language code
+ * @returns {Promise<string>} Translated text
+ */
+async function translateProviderYandex(text, lang) {
+    let chunks = [];
+    const chunkSize = 5000;
+    if (text.length <= chunkSize) {
+        chunks.push(text);
+    } else {
+        chunks = splitRecursive(text, chunkSize);
+    }
+    const response = await fetch('/api/translate/yandex', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ chunks: chunks, lang: lang }),
+    });
+
+    if (response.ok) {
+        const result = await response.text();
+        return result;
+    }
+
+    throw new Error(response.statusText);
+}
+
+/**
  * Splits text into chunks and translates each chunk separately
  * @param {string} text Text to translate
  * @param {string} lang Target language code
@@ -371,6 +402,10 @@ async function translate(text, lang) {
             return '';
         }
 
+        if (!lang) {
+            lang = extension_settings.translate.target_language;
+        }
+
         switch (extension_settings.translate.provider) {
             case 'libre':
                 return await translateProviderLibre(text, lang);
@@ -386,6 +421,8 @@ async function translate(text, lang) {
                 return await translateProviderOneRing(text, lang);
             case 'bing':
                 return await chunkedTranslate(text, lang, translateProviderBing, 1000);
+            case 'yandex':
+                return await translateProviderYandex(text, lang);
             default:
                 console.error('Unknown translation provider', extension_settings.translate.provider);
                 return text;
@@ -471,7 +508,8 @@ async function onTranslateChatClick() {
 }
 
 async function onTranslationsClearClick() {
-    const confirm = await callPopup('<h3>Are you sure?</h3>This will remove translated text from all messages in the current chat. This action cannot be undone.', 'confirm');
+    const popupHtml = await renderExtensionTemplateAsync('translate', 'deleteConfirmation');
+    const confirm = await callPopup(popupHtml, 'confirm');
 
     if (!confirm) {
         return;
@@ -529,56 +567,10 @@ const handleMessageEdit = createEventHandler(translateMessageEdit, () => true);
 
 window['translate'] = translate;
 
-jQuery(() => {
-    const html = `
-    <div class="translation_settings">
-        <div class="inline-drawer">
-            <div class="inline-drawer-toggle inline-drawer-header">
-                <b>Chat Translation</b>
-                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-            </div>
-            <div class="inline-drawer-content">
-                <label for="translation_auto_mode" class="checkbox_label">Auto-mode</label>
-                <select id="translation_auto_mode">
-                    <option value="none">None</option>
-                    <option value="responses">Translate responses</option>
-                    <option value="inputs">Translate inputs</option>
-                    <option value="both">Translate both</option>
-                </select>
-                <label for="translation_provider">Provider</label>
-                <div class="flex-container gap5px flexnowrap marginBot5">
-                    <select id="translation_provider" name="provider" class="margin0">
-                        <option value="libre">Libre</option>
-                        <option value="google">Google</option>
-                        <option value="lingva">Lingva</option>
-                        <option value="deepl">DeepL</option>
-                        <option value="deeplx">DeepLX</option>
-                        <option value="bing">Bing</option>
-                        <option value="oneringtranslator">OneRingTranslator</option>
-                    <select>
-                    <div id="translate_key_button" class="menu_button fa-solid fa-key margin0"></div>
-                    <div id="translate_url_button" class="menu_button fa-solid fa-link margin0"></div>
-                </div>
-                <label for="translation_target_language">Target Language</label>
-                <select id="translation_target_language" name="target_language"></select>
-                <div id="translation_clear" class="menu_button">
-                    <i class="fa-solid fa-trash-can"></i>
-                    <span>Clear Translations</span>
-                </div>
-            </div>
-        </div>
-    </div>`;
+jQuery(async () => {
+    const html = await renderExtensionTemplateAsync('translate', 'index');
 
-    const buttonHtml = `
-        <div id="translate_chat" class="list-group-item flex-container flexGap5">
-            <div class="fa-solid fa-language extensionsMenuExtensionButton" /></div>
-            Translate Chat
-        </div>
-        <div id="translate_input_message" class="list-group-item flex-container flexGap5">
-            <div class="fa-solid fa-keyboard extensionsMenuExtensionButton" /></div>
-            Translate Input
-        </div>
-        `;
+    const buttonHtml = await renderExtensionTemplateAsync('translate', 'buttons');
     $('#extensionsMenu').append(buttonHtml);
     $('#extensions_settings2').append(html);
     $('#translate_chat').on('click', onTranslateChatClick);
@@ -642,11 +634,29 @@ jQuery(() => {
 
     loadSettings();
 
-    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, handleIncomingMessage);
+    eventSource.makeFirst(event_types.CHARACTER_MESSAGE_RENDERED, handleIncomingMessage);
+    eventSource.makeFirst(event_types.USER_MESSAGE_RENDERED, handleOutgoingMessage);
     eventSource.on(event_types.MESSAGE_SWIPED, handleIncomingMessage);
-    eventSource.on(event_types.USER_MESSAGE_RENDERED, handleOutgoingMessage);
     eventSource.on(event_types.IMPERSONATE_READY, handleImpersonateReady);
-    eventSource.on(event_types.MESSAGE_EDITED, handleMessageEdit);
+    eventSource.on(event_types.MESSAGE_UPDATED, handleMessageEdit);
 
     document.body.classList.add('translate');
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'translate',
+        helpString: 'Translate text to a target language. If target language is not provided, the value from the extension settings will be used.',
+        namedArgumentList: [
+            new SlashCommandNamedArgument('target', 'The target language code to translate to', ARGUMENT_TYPE.STRING, false, false, '', Object.values(languageCodes)),
+        ],
+        unnamedArgumentList: [
+            new SlashCommandArgument('The text to translate', ARGUMENT_TYPE.STRING, true, false, ''),
+        ],
+        callback: async (args, value) => {
+            const target = args?.target && Object.values(languageCodes).includes(String(args.target))
+                ? String(args.target)
+                : extension_settings.translate.target_language;
+            return await translate(String(value), target);
+        },
+        returns: ARGUMENT_TYPE.STRING,
+    }));
 });

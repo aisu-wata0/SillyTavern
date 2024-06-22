@@ -42,6 +42,46 @@ EventEmitter.prototype.on = function (event, listener) {
     this.events[event].push(listener);
 };
 
+/**
+ * Makes the listener the last to be called when the event is emitted
+ * @param {string} event Event name
+ * @param {function} listener Event listener
+ */
+EventEmitter.prototype.makeLast = function (event, listener) {
+    if (typeof this.events[event] !== 'object') {
+        this.events[event] = [];
+    }
+
+    const events = this.events[event];
+    const idx = events.indexOf(listener);
+
+    if (idx > -1) {
+        events.splice(idx, 1);
+    }
+
+    events.push(listener);
+}
+
+/**
+ * Makes the listener the first to be called when the event is emitted
+ * @param {string} event Event name
+ * @param {function} listener Event listener
+ */
+EventEmitter.prototype.makeFirst = function (event, listener) {
+    if (typeof this.events[event] !== 'object') {
+        this.events[event] = [];
+    }
+
+    const events = this.events[event];
+    const idx = events.indexOf(listener);
+
+    if (idx > -1) {
+        events.splice(idx, 1);
+    }
+
+    events.unshift(listener);
+}
+
 EventEmitter.prototype.removeListener = function (event, listener) {
     var idx;
 
@@ -56,7 +96,7 @@ EventEmitter.prototype.removeListener = function (event, listener) {
 
 EventEmitter.prototype.emit = async function (event) {
     if (localStorage.getItem('eventTracing') === 'true') {
-        console.trace('Event emitted: ' + event);
+        console.trace('Event emitted: ' + event, args);
     } else {
         console.debug('Event emitted: ' + event);
     }
@@ -81,7 +121,7 @@ EventEmitter.prototype.emit = async function (event) {
 
 EventEmitter.prototype.emitAndWait = function (event) {
     if (localStorage.getItem('eventTracing') === 'true') {
-        console.trace('Event emitted: ' + event);
+        console.trace('Event emitted: ' + event, args);
     } else {
         console.debug('Event emitted: ' + event);
     }

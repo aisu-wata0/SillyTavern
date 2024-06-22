@@ -1,6 +1,9 @@
 import { getRequestHeaders } from '../script.js';
 import { renderExtensionTemplateAsync } from './extensions.js';
 import { POPUP_RESULT, POPUP_TYPE, callGenericPopup } from './popup.js';
+import { SlashCommand } from './slash-commands/SlashCommand.js';
+import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from './slash-commands/SlashCommandArgument.js';
+import { SlashCommandParser } from './slash-commands/SlashCommandParser.js';
 import { isValidUrl } from './utils.js';
 
 /**
@@ -182,7 +185,7 @@ class WebScraper {
         const files = [];
 
         for (const link of links) {
-            const result = await fetch('/api/serpapi/visit', {
+            const result = await fetch('/api/search/visit', {
                 method: 'POST',
                 headers: getRequestHeaders(),
                 body: JSON.stringify({ url: link }),
@@ -235,6 +238,91 @@ class FileScraper {
             fileInput.onchange = () => resolve(Array.from(fileInput.files));
             fileInput.click();
         });
+    }
+}
+
+class MediaWikiScraper {
+    constructor() {
+        this.id = 'mediawiki';
+        this.name = 'MediaWiki';
+        this.description = 'Download a page from a MediaWiki wiki.';
+        this.iconClass = 'fa-brands fa-wikipedia-w';
+        this.iconAvailable = true;
+    }
+
+    async isAvailable() {
+        try {
+            const result = await fetch('/api/plugins/fandom/probe-mediawiki', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+            });
+
+            return result.ok;
+        } catch (error) {
+            console.debug('Could not probe Fandom/MediaWiki plugin', error);
+            return false;
+        }
+    }
+
+    async scrape() {
+        let url = '';
+        let filter = '';
+        let output = 'single';
+
+        const template = $(await renderExtensionTemplateAsync('attachments', 'mediawiki-scrape', {}));
+        template.find('input[name="scrapeInput"]').on('input', function () {
+            url = String($(this).val()).trim();
+        });
+        template.find('input[name="scrapeFilter"]').on('input', function () {
+            filter = String($(this).val());
+        });
+        template.find('input[name="scrapeOutput"]').on('input', function () {
+            output = String($(this).val());
+        });
+
+        const confirm = await callGenericPopup(template, POPUP_TYPE.CONFIRM, '', { wide: false, large: false, okButton: 'Scrape', cancelButton: 'Cancel' });
+
+        if (confirm !== POPUP_RESULT.AFFIRMATIVE) {
+            return;
+        }
+
+        if (!url) {
+            toastr.error('URL name is required');
+            return;
+        }
+
+        const toast = toastr.info('Working, please wait...');
+
+        const result = await fetch('/api/plugins/fandom/scrape-mediawiki', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ url, filter }),
+        });
+
+        if (!result.ok) {
+            const error = await result.text();
+            throw new Error(error);
+        }
+
+        const data = await result.json();
+        toastr.clear(toast);
+
+        if (output === 'multi') {
+            const files = [];
+            for (const attachment of data) {
+                const file = new File([String(attachment.content).trim()], `${String(attachment.title).trim()}.txt`, { type: 'text/plain' });
+                files.push(file);
+            }
+            return files;
+        }
+
+        if (output === 'single') {
+            const combinedContent = data.map((a) => String(a.title).trim() + '\n\n' + String(a.content).trim()).join('\n\n\n\n');
+            const file = new File([combinedContent], `${url}.txt`, { type: 'text/plain' });
+            return [file];
+        }
+
+        return [];
     }
 }
 
@@ -356,6 +444,32 @@ class YouTubeScraper {
         this.description = 'Download a transcript from a YouTube video.';
         this.iconClass = 'fa-brands fa-youtube';
         this.iconAvailable = true;
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'yt-script',
+            callback: async (args, url) => {
+                try {
+                    if (!url) {
+                        throw new Error('URL or ID of the YouTube video is required');
+                    }
+
+                    const lang = String(args?.lang || '');
+                    const { transcript } = await this.getScript(String(url).trim(), lang);
+                    return transcript;
+                } catch (error) {
+                    toastr.error(error.message);
+                    return '';
+                }
+            },
+            helpString: 'Scrape a transcript from a YouTube video by ID or URL.',
+            returns: ARGUMENT_TYPE.STRING,
+            namedArgumentList: [
+                new SlashCommandNamedArgument('lang', 'ISO 639-1 language code of the transcript, e.g. "en"', ARGUMENT_TYPE.STRING, false, false, ''),
+            ],
+            unnamedArgumentList: [
+                new SlashCommandArgument('URL or ID of the YouTube video', ARGUMENT_TYPE.STRING, true, false),
+            ],
+        }));
     }
 
     /**
@@ -371,7 +485,12 @@ class YouTubeScraper {
      * @param {string} url URL of the YouTube video
      * @returns {string} ID of the YouTube video
      */
-    parseId(url){
+    parseId(url) {
+        // If the URL is already an ID, return it
+        if (/^[a-zA-Z0-9_-]{11}$/.test(url)) {
+            return url;
+        }
+
         const regex = /^.*(?:(?:youtu\.be\/|v\/|vi\/|u\/\w\/|embed\/|shorts\/)|(?:(?:watch)?\?v(?:i)?=|&v(?:i)?=))([^#&?]*).*/;
         const match = url.match(regex);
         return (match?.length && match[1] ? match[1] : url);
@@ -394,10 +513,24 @@ class YouTubeScraper {
             return;
         }
 
-        const id = this.parseId(String(videoUrl).trim());
         const toast = toastr.info('Working, please wait...');
+        const { transcript, id } = await this.getScript(videoUrl, lang);
+        toastr.clear(toast);
 
-        const result = await fetch('/api/serpapi/transcript', {
+        const file = new File([transcript], `YouTube - ${id} - ${Date.now()}.txt`, { type: 'text/plain' });
+        return [file];
+    }
+
+    /**
+     * Fetches the transcript of a YouTube video.
+     * @param {string} videoUrl Video URL or ID
+     * @param {string} lang Video language
+     * @returns {Promise<{ transcript: string, id: string }>} Transcript of the YouTube video with the video ID
+     */
+    async getScript(videoUrl, lang) {
+        const id = this.parseId(String(videoUrl).trim());
+
+        const result = await fetch('/api/search/transcript', {
             method: 'POST',
             headers: getRequestHeaders(),
             body: JSON.stringify({ id, lang }),
@@ -409,15 +542,13 @@ class YouTubeScraper {
         }
 
         const transcript = await result.text();
-        toastr.clear(toast);
-
-        const file = new File([transcript], `YouTube - ${id} - ${Date.now()}.txt`, { type: 'text/plain' });
-        return [file];
+        return { transcript, id };
     }
 }
 
 ScraperManager.registerDataBankScraper(new FileScraper());
 ScraperManager.registerDataBankScraper(new Notepad());
 ScraperManager.registerDataBankScraper(new WebScraper());
+ScraperManager.registerDataBankScraper(new MediaWikiScraper());
 ScraperManager.registerDataBankScraper(new FandomScraper());
 ScraperManager.registerDataBankScraper(new YouTubeScraper());
