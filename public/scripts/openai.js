@@ -1454,9 +1454,8 @@ for (let i = 0; i < drawerTogglers.length; i++) {
 }
 
 // Temporary url for testing
-// const absoluteRPGAdventureUrl = 'https://aisu-wata-ara.hf.space';
-const absoluteRPGAdventureUrl = 'http://127.0.0.1:7860';
-// const absoluteRPGAdventureUrl = "https://152d-2001-1284-f514-50bf-a6af-5b2c-adfa-ba30.ngrok-free.app";
+const absoluteRPGAdventureUrl = 'https://aisu-wata-ara.hf.space';
+// const absoluteRPGAdventureUrl = 'http://127.0.0.1:7860';
 
 // const votingUrl = "";
 const votingUrl = "http://localhost:7861";
@@ -2234,7 +2233,14 @@ let VoteTracker = {
 
 async function votingFetchVoteTrackerState() {
     try {
-        const response = await fetch(votingUrl + '/voteTracker');
+        const consumer = {Name: "SillyTavern"}
+        const response = await fetch(votingUrl + '/voteTracker', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(consumer),
+        });
         const data = await response.json();
         // Process the voteTracker state data
         // Update the UI with the current voting progress and remaining time
@@ -2245,6 +2251,14 @@ async function votingFetchVoteTrackerState() {
                 ...data.Topics,
             },
         }
+
+        if (VoteTracker.CommandsPerConsumer) {
+            if (VoteTracker.CommandsPerConsumer[consumer.Name]) {
+                VoteTracker.Commands = VoteTracker.CommandsPerConsumer[consumer.Name]
+            }
+            // delete VoteTracker.CommandsPerConsumer
+        }
+
         delete VotingInternal.errors.votingFetchVoteTrackerState
         console.log(ARA_msg_suffix, "votingFetchVoteTrackerState()", "\n data=", JSON.stringify(data, null, "  "), "\n VoteTracker=", JSON.stringify(VoteTracker, null, "  "));
     } catch (error) {
@@ -2374,16 +2388,22 @@ function checkExpiredTopics() {
 
 
 function chatBotCommands() {
-    for (const command of VoteTracker.Commands) {
+    const usedCommands = [];
+    for (let i = VoteTracker.Commands.length - 1; i >= 0; i--) {
+        const command = VoteTracker.Commands[i];
         if (command.Name == "!scroll") {
             let el = document.getElementById("sheet-" + command.Content)
             console.info(ARA_msg_suffix, "chatBotCommands()", "!scroll", "  command=", command, "  el=", el);
             if (el) {
                 el.scrollIntoView(true);
             }
+            usedCommands.push(i); // Push the index of used command
         }
     }
-    VoteTracker.Commands = [];
+    // Filter out unused commands using splice
+    for (let i = usedCommands.length - 1; i >= 0; i--) {
+      VoteTracker.Commands.splice(usedCommands[i], 1);
+    }
 }
 
 async function votingUpdate() {
