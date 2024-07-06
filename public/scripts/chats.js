@@ -4,7 +4,6 @@ import css from '../lib/css-parser.mjs';
 import {
     addCopyToCodeBlocks,
     appendMediaToMessage,
-    callPopup,
     characters,
     chat,
     eventSource,
@@ -35,9 +34,10 @@ import {
     extractTextFromOffice,
 } from './utils.js';
 import { extension_settings, renderExtensionTemplateAsync, saveMetadataDebounced } from './extensions.js';
-import { POPUP_RESULT, POPUP_TYPE, callGenericPopup } from './popup.js';
+import { POPUP_RESULT, POPUP_TYPE, Popup, callGenericPopup } from './popup.js';
 import { ScraperManager } from './scrapers.js';
 import { DragAndDropHandler } from './dragdrop.js';
+import { renderTemplateAsync } from './templates.js';
 
 /**
  * @typedef {Object} FileAttachment
@@ -185,18 +185,19 @@ export async function populateFileAttachment(message, inputId = 'file_form_input
         const file = fileInput.files[0];
         if (!file) return;
 
+        const slug = getStringHash(file.name);
+        const fileNamePrefix = `${Date.now()}_${slug}`;
         const fileBase64 = await getBase64Async(file);
         let base64Data = fileBase64.split(',')[1];
 
         // If file is image
         if (file.type.startsWith('image/')) {
             const extension = file.type.split('/')[1];
-            const imageUrl = await saveBase64AsFile(base64Data, name2, file.name, extension);
+            const imageUrl = await saveBase64AsFile(base64Data, name2, fileNamePrefix, extension);
             message.extra.image = imageUrl;
             message.extra.inline_image = true;
         } else {
-            const slug = getStringHash(file.name);
-            const uniqueFileName = `${Date.now()}_${slug}.txt`;
+            const uniqueFileName = `${fileNamePrefix}.txt`;
 
             if (isConvertible(file.type)) {
                 try {
@@ -319,12 +320,10 @@ export function hasPendingFileAttachment() {
 
 /**
  * Displays file information in the message sending form.
+ * @param {File} file File object
  * @returns {Promise<void>}
  */
-async function onFileAttach() {
-    const fileInput = document.getElementById('file_form_input');
-    if (!(fileInput instanceof HTMLInputElement)) return;
-    const file = fileInput.files[0];
+async function onFileAttach(file) {
     if (!file) return;
 
     const isValid = await validateFile(file);
@@ -419,6 +418,7 @@ function embedMessageFile(messageId, messageBlock) {
         }
 
         await populateFileAttachment(message, 'embed_file_input');
+        await eventSource.emit(event_types.MESSAGE_FILE_EMBEDDED, messageId);
         appendMediaToMessage(message, messageBlock);
         await saveChatConditional();
     }
@@ -524,7 +524,7 @@ async function openExternalMediaOverridesDialog() {
         return;
     }
 
-    const template = $('#forbid_media_override_template > .forbid_media_override').clone();
+    const template = $(await renderTemplateAsync('forbidMedia'));
     template.find('.forbid_media_global_state_forbidden').toggle(power_user.forbid_external_media);
     template.find('.forbid_media_global_state_allowed').toggle(!power_user.forbid_external_media);
 
@@ -538,7 +538,7 @@ async function openExternalMediaOverridesDialog() {
         template.find('#forbid_media_override_global').prop('checked', true);
     }
 
-    callPopup(template, 'text', '', { wide: false, large: false });
+    callGenericPopup(template, POPUP_TYPE.TEXT, '', { wide: false, large: false });
 }
 
 export function getCurrentEntityId() {
@@ -566,7 +566,7 @@ export function isExternalMediaAllowed() {
     return !power_user.forbid_external_media;
 }
 
-function enlargeMessageImage() {
+async function enlargeMessageImage() {
     const mesBlock = $(this).closest('.mes');
     const mesId = mesBlock.attr('mesid');
     const message = chat[mesId];
@@ -580,14 +580,28 @@ function enlargeMessageImage() {
     const img = document.createElement('img');
     img.classList.add('img_enlarged');
     img.src = imgSrc;
+    const imgHolder = document.createElement('div');
+    imgHolder.classList.add('img_enlarged_holder');
+    imgHolder.append(img);
     const imgContainer = $('<div><pre><code></code></pre></div>');
-    imgContainer.prepend(img);
+    imgContainer.prepend(imgHolder);
     imgContainer.addClass('img_enlarged_container');
     imgContainer.find('code').addClass('txt').text(title);
     const titleEmpty = !title || title.trim().length === 0;
     imgContainer.find('pre').toggle(!titleEmpty);
     addCopyToCodeBlocks(imgContainer);
-    callGenericPopup(imgContainer, POPUP_TYPE.TEXT, '', { wide: true, large: true });
+
+    const popup = new Popup(imgContainer, POPUP_TYPE.DISPLAY, '', { large: true, transparent: true });
+
+    popup.dlg.style.width = 'unset';
+    popup.dlg.style.height = 'unset';
+
+    img.addEventListener('click', () => {
+        const shouldZoom = !img.classList.contains('zoomed');
+        img.classList.toggle('zoomed', shouldZoom);
+    });
+
+    await popup.show();
 }
 
 async function deleteMessageImage() {
@@ -602,6 +616,8 @@ async function deleteMessageImage() {
     const message = chat[mesId];
     delete message.extra.image;
     delete message.extra.inline_image;
+    delete message.extra.title;
+    delete message.extra.append_title;
     mesBlock.find('.mes_img_container').removeClass('img_extra');
     mesBlock.find('.mes_img').attr('src', '');
     await saveChatConditional();
@@ -1105,7 +1121,7 @@ async function openAttachmentManager() {
     const cleanupFn = await renderButtons();
     await verifyAttachments();
     await renderAttachments();
-    await callGenericPopup(template, POPUP_TYPE.TEXT, '', { wide: true, large: true, okButton: 'Close' });
+    await callGenericPopup(template, POPUP_TYPE.TEXT, '', { wide: true, large: true, okButton: 'Close', allowVerticalScrolling: true });
 
     cleanupFn();
     dragDropHandler.destroy();
@@ -1414,7 +1430,7 @@ jQuery(function () {
         wrapper.classList.add('flexFlowColumn', 'justifyCenter', 'alignitemscenter');
         const textarea = document.createElement('textarea');
         textarea.value = String(bro.val());
-        textarea.classList.add('height100p', 'wide100p');
+        textarea.classList.add('height100p', 'wide100p', 'maximized_textarea');
         bro.hasClass('monospace') && textarea.classList.add('monospace');
         textarea.addEventListener('input', function () {
             bro.val(textarea.value).trigger('input');
@@ -1451,7 +1467,7 @@ jQuery(function () {
             });
         }
 
-        callPopup(wrapper, 'text', '', { wide: true, large: true });
+        callGenericPopup(wrapper, POPUP_TYPE.TEXT, '', { wide: true, large: true });
     });
 
     $(document).on('click', 'body.documentstyle .mes .mes_text', function () {
@@ -1489,8 +1505,34 @@ jQuery(function () {
     $(document).on('click', '.mes_img_enlarge', enlargeMessageImage);
     $(document).on('click', '.mes_img_delete', deleteMessageImage);
 
-    $('#file_form_input').on('change', onFileAttach);
+    $('#file_form_input').on('change', async () => {
+        const fileInput = document.getElementById('file_form_input');
+        if (!(fileInput instanceof HTMLInputElement)) return;
+        const file = fileInput.files[0];
+        await onFileAttach(file);
+    });
     $('#file_form').on('reset', function () {
         $('#file_form').addClass('displayNone');
+    });
+
+    document.getElementById('send_textarea').addEventListener('paste', async function (event) {
+        if (event.clipboardData.files.length === 0) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const fileInput = document.getElementById('file_form_input');
+        if (!(fileInput instanceof HTMLInputElement)) return;
+
+        // Workaround for Firefox: Use a DataTransfer object to indirectly set fileInput.files
+        const dataTransfer = new DataTransfer();
+        for (let i = 0; i < event.clipboardData.files.length; i++) {
+            dataTransfer.items.add(event.clipboardData.files[i]);
+        }
+
+        fileInput.files = dataTransfer.files;
+        await onFileAttach(fileInput.files[0]);
     });
 });

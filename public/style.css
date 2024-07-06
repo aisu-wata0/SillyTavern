@@ -82,7 +82,7 @@
     /*base variable calculated in rems*/
     --fontScale: 1;
     --mainFontSize: calc(var(--fontScale) * 15px);
-    --mainFontFamily: "Noto Sans", "Noto Color Emoji", sans-serif;
+    --mainFontFamily: "Noto Sans", sans-serif;
     --monoFontFamily: 'Noto Sans Mono', 'Courier New', Consolas, monospace;
 
     /* base variable for blur strength slider calculations */
@@ -256,10 +256,6 @@ input[type='checkbox']:focus-visible {
     color: var(--SmartThemeEmColor);
 }
 
-#rawPromptWrapper {
-    white-space: pre-wrap;
-}
-
 .tokenGraph {
     border-radius: 10px;
     border: 1px solid var(--SmartThemeBorderColor);
@@ -366,11 +362,6 @@ input[type='checkbox']:focus-visible {
     font-weight: bold;
 }
 
-.img_enlarged_container {
-    padding: 10px;
-}
-
-.img_enlarged_container pre code,
 .mes_text pre code {
     position: relative;
     display: block;
@@ -467,7 +458,7 @@ code {
 kbd {
     display: inline-block;
     padding: 2px 4px;
-    font-family: Consolas, monospace;
+    font-family: var(--monoFontFamily);
     white-space: nowrap;
     /* background-color: #eeeeee; */
     background-color: rgba(255, 255, 255, 0.9);
@@ -832,7 +823,7 @@ body .panelControlBar {
 }
 
 .font-family-reset {
-    font-family:  var(--mainFontFamily);
+    font-family: var(--mainFontFamily);
     font-size: var(--mainFontSize);
     font-weight: 400;
 }
@@ -890,7 +881,8 @@ body .panelControlBar {
 }
 
 .options-content a,
-#extensionsMenu>div,
+#extensionsMenu>.extension_container>div,
+#extensionsMenu>div:not(.extension_container),
 .list-group>div,
 .list-group .list-group-item,
 #sd_dropdown .list-group span {
@@ -904,13 +896,15 @@ body .panelControlBar {
     align-items: baseline;
 }
 
-#extensionsMenu>div,
+#extensionsMenu>.extension_container>div,
+#extensionsMenu>div:not(.extension_container),
 .options-content a,
 .list-group-item {
     opacity: 0.5;
 }
 
-#extensionsMenu>div:hover,
+#extensionsMenu>.extension_container>div:hover,
+#extensionsMenu>div:not(.extension_container):hover,
 .options-content a:hover,
 .list-group-item:hover {
     opacity: 1;
@@ -1516,6 +1510,14 @@ body[data-stscript-style] .autoComplete [data-option-type] {
     &[data-option-type="macro"] .type {
         color: var(--ac-color-variableLanguage);
     }
+
+    &[data-option-type="number"] .type {
+        color: var(--ac-color-number);
+    }
+
+    &[data-option-type="name"] .type {
+        color: var(--ac-color-type);
+    }
 }
 
 body[data-stscript-style] .hljs.language-stscript {
@@ -1625,6 +1627,11 @@ body[data-stscript-style] .hljs.language-stscript {
         gap: 0.5em;
         display: contents;
 
+        >.stopgap {
+            opacity: 0.75;
+            display: none;
+        }
+
         @container (max-width: 80em) {
             .specs {
                 grid-column: 2 / 4;
@@ -1635,6 +1642,10 @@ body[data-stscript-style] .hljs.language-stscript {
                 padding-left: 1em;
                 opacity: 0.75;
                 height: auto;
+            }
+
+            >.stopgap {
+                display: inline-block;
             }
         }
 
@@ -2373,6 +2384,10 @@ input[type="file"] {
     padding: 1px;
 }
 
+#rm_print_characters_block .entity_block.useless {
+    opacity: 0.25;
+}
+
 #rm_ch_create_block {
     display: none;
     overflow-y: auto;
@@ -2917,6 +2932,23 @@ input[type=search]:focus::-webkit-search-cancel-button {
     position: relative;
 }
 
+.group_member .queue_position:not(:empty)::before {
+    content: "#";
+}
+
+.group_member .queue_position {
+    margin-right: 0.75rem;
+    font-size: calc(var(--mainFontSize) * 0.9);
+}
+
+.group_member.is_queued {
+    outline: 2px solid var(--golden);
+}
+
+.group_member.is_active {
+    outline: 2px solid var(--active);
+}
+
 .character_select.is_fav .avatar,
 .group_select.is_fav .avatar,
 .group_member.is_fav .avatar,
@@ -3143,6 +3175,24 @@ grammarly-extension {
 
 .wider_dialogue_popup {
     min-width: 750px;
+    max-width: 90%;
+}
+
+/* If doesn't fit 750px in 90% of the screen, we should re-scale the wider popup */
+@media (max-width: calc(750px / 0.9)) {
+    .wider_dialogue_popup {
+        min-width: 90%;
+    }
+}
+
+.transparent_dialogue_popup {
+    background-color: transparent;
+    box-shadow: none;
+    border: none;
+}
+
+.transparent_dialogue_popup:focus-visible {
+    outline: none;
 }
 
 #dialogue_popup .horizontal_scrolling_dialogue_popup {
@@ -4127,17 +4177,6 @@ h5 {
     grid-template-columns: 340px auto;
 }
 
-#avatarCropWrap {
-    margin: 10px auto;
-    max-height: 90%;
-    max-width: 100%;
-}
-
-#avatarToCrop {
-    max-width: 100%;
-    /* This rule is very important, please do not ignore this! */
-}
-
 body .ui-autocomplete {
     max-height: 300px;
     overflow-y: auto;
@@ -4339,8 +4378,7 @@ a {
     text-decoration: none;
 }
 
-#export_format_popup,
-#rawPromptPopup {
+#export_format_popup {
     display: none;
     z-index: 9999;
 }
@@ -4348,7 +4386,7 @@ a {
 #rawPromptPopup {
     inset: 0px auto auto 0px;
     margin: 0px;
-    transform: translate(909px, 47px);
+    transform: translate(500px, 0px);
     display: block;
     overflow-wrap: break-word;
     white-space: normal;
@@ -4367,7 +4405,8 @@ a {
     display: none;
 }
 
-#rawPopupWrapper {
+#rawPromptWrapper {
+    white-space: pre-wrap;
     word-wrap: break-word;
     width: 100%;
     text-align: start;
@@ -4459,38 +4498,118 @@ a {
 
 .mes_img_controls {
     position: absolute;
-    top: 0.5em;
+    top: 0.1em;
     left: 0;
     width: 100%;
-    display: none;
+    display: flex;
+    opacity: 0;
     flex-direction: row;
     justify-content: space-between;
     padding: 1em;
 }
 
 .mes_img_controls .right_menu_button {
-    padding: 0;
-    filter: brightness(80%);
+    filter: brightness(90%);
+    text-shadow: 1px 1px var(--SmartThemeShadowColor) !important;
+    padding: 1px;
+    height: 1.25em;
+    width: 1.25em;
+}
+
+.mes_img_controls .right_menu_button::before {
+    /* Fix weird alignment with this font-awesome icons on focus */
+    position: relative;
+    top: 0.6125em;
 }
 
 .mes_img_controls .right_menu_button:hover {
     filter: brightness(150%);
 }
 
-.mes_img_container:hover .mes_img_controls {
-    display: flex;
+.mes_img_container:hover .mes_img_controls,
+.mes_img_container:focus-within .mes_img_controls {
+    opacity: 1;
 }
 
 .mes .mes_img_container.img_extra {
     display: flex;
 }
 
+body:not(.caption) .mes_img_caption {
+    display: none;
+}
+
+.img_enlarged_holder {
+    /* Scaling via flex-grow and object-fit only works if we have some kind of base-height set */
+    min-height: 120px;
+}
+
+.img_enlarged_holder:has(.zoomed) {
+    overflow: auto;
+}
+
 .img_enlarged {
-    max-width: 100%;
-    max-height: 100%;
-    border-radius: 2px;
-    border: 1px solid transparent;
-    outline: 1px solid var(--SmartThemeBorderColor);
+    object-fit: contain;
+    width: 100%;
+    height: 100%;
+    cursor: zoom-in
+}
+
+.img_enlarged.zoomed {
+    object-fit: cover;
+    width: auto;
+    height: auto;
+    cursor: zoom-out;
+}
+
+.img_enlarged_container {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 10px;
+    height: 100%;
+    width: 100%;
+}
+
+.img_enlarged_holder::-webkit-scrollbar-corner {
+    background-color: transparent;
+}
+
+.img_enlarged_container pre code {
+    position: relative;
+    display: block;
+    overflow-x: auto;
+    padding: 1em;
+}
+
+.img_enlarged_container pre {
+    max-height: 25vh;
+    max-height: 25svh;
+    flex-shrink: 0;
+    overflow: auto;
+}
+
+.popup:has(.img_enlarged.zoomed).large_dialogue_popup {
+    height: 100vh !important;
+    height: 100svh !important;
+    max-height: 100vh !important;
+    max-height: 100svh !important;
+    max-width: 100vw !important;
+    max-width: 100svw !important;
+    padding: 0;
+}
+
+.popup:has(.img_enlarged.zoomed).large_dialogue_popup .popup-content {
+    margin: 0;
+    padding: 0;
+}
+
+.popup:has(.img_enlarged.zoomed).large_dialogue_popup .img_enlarged_container pre {
+    display: none;
+}
+
+.popup:has(.img_enlarged.zoomed).large_dialogue_popup .popup-button-close {
+    display: none !important;
 }
 
 .cropper-container {

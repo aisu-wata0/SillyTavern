@@ -24,6 +24,7 @@ import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../slash-commands/SlashCommandArgument.js';
 import { resolveVariable } from '../../variables.js';
+import { commonEnumProviders } from '../../slash-commands/SlashCommandCommonEnumsProvider.js';
 export { MODULE_NAME };
 
 const MODULE_NAME = '1_memory';
@@ -446,7 +447,7 @@ async function summarizeCallback(args, text) {
     }
 
     const source = args.source || extension_settings.memory.source;
-    const prompt = substituteParamsExtended((resolveVariable(args.prompt) || extension_settings.memory.prompt), { words: extension_settings.memory.promptWords });
+    const prompt = substituteParamsExtended((args.prompt || extension_settings.memory.prompt), { words: extension_settings.memory.promptWords });
 
     try {
         switch (source) {
@@ -899,7 +900,7 @@ function setupListeners() {
 jQuery(async function () {
     async function addExtensionControls() {
         const settingsHtml = await renderExtensionTemplateAsync('memory', 'settings', { defaultSettings });
-        $('#extensions_settings2').append(settingsHtml);
+        $('#summarize_container').append(settingsHtml);
         setupListeners();
         $('#summaryExtensionPopoutButton').off('click').on('click', function (e) {
             doPopout(e);
@@ -919,7 +920,12 @@ jQuery(async function () {
         callback: summarizeCallback,
         namedArgumentList: [
             new SlashCommandNamedArgument('source', 'API to use for summarization', [ARGUMENT_TYPE.STRING], false, false, '', ['main', 'extras']),
-            new SlashCommandNamedArgument('prompt', 'prompt to use for summarization', [ARGUMENT_TYPE.STRING, ARGUMENT_TYPE.VARIABLE_NAME], false, false, ''),
+            SlashCommandNamedArgument.fromProps({
+                name: 'prompt',
+                description: 'prompt to use for summarization',
+                typeList: [ARGUMENT_TYPE.STRING],
+                defaultValue: '',
+            }),
         ],
         unnamedArgumentList: [
             new SlashCommandArgument('text to summarize', [ARGUMENT_TYPE.STRING], false, false, ''),

@@ -1,8 +1,9 @@
 import { getContext } from './extensions.js';
-import { callPopup, getRequestHeaders } from '../script.js';
+import { getRequestHeaders } from '../script.js';
 import { isMobile } from './RossAscends-mods.js';
 import { collapseNewlines } from './power-user.js';
 import { debounce_timeout } from './constants.js';
+import { Popup } from './popup.js';
 
 /**
  * Pagination status string template.
@@ -624,6 +625,25 @@ export function isFalseBoolean(arg) {
 }
 
 /**
+ * Parses an array either as a comma-separated string or as a JSON array.
+ * @param {string} value String to parse
+ * @returns {string[]} The parsed array.
+ */
+export function parseStringArray(value) {
+    if (!value || typeof value !== 'string') return [];
+
+    try {
+        const parsedValue = JSON.parse(value);
+        if (!Array.isArray(parsedValue)) {
+            throw new Error('Not an array');
+        }
+        return parsedValue.map(x => String(x));
+    } catch (e) {
+        return value.split(',').map(x => x.trim()).filter(x => x);
+    }
+}
+
+/**
  * Checks if a number is odd.
  * @param {number} number The number to check.
  * @returns {boolean} True if the number is odd, false otherwise.
@@ -783,7 +803,7 @@ export function getImageSizeFromDataURL(dataUrl) {
 
 export function getCharaFilename(chid) {
     const context = getContext();
-    const fileName = context.characters[chid ?? context.characterId].avatar;
+    const fileName = context.characters[chid ?? context.characterId]?.avatar;
 
     if (fileName) {
         return fileName.replace(/\.[^/.]+$/, '');
@@ -1539,8 +1559,8 @@ export function flashHighlight(element, timespan = 2000) {
  * @returns {boolean} Whether the control has an animation applied
  */
 export function hasAnimation(control) {
-    const animatioName = getComputedStyle(control, null)["animation-name"];
-    return animatioName != "none";
+    const animatioName = getComputedStyle(control, null)['animation-name'];
+    return animatioName != 'none';
 }
 
 /**
@@ -1802,7 +1822,7 @@ export async function checkOverwriteExistingData(type, existingNames, name, { in
         return true;
     }
 
-    const overwrite = interactive ? await callPopup(`<h3>${type} ${actionName}</h3><p>A ${type.toLowerCase()} with the same name already exists:<br />${existing}</p>Do you want to overwrite it?`, 'confirm') : false;
+    const overwrite = interactive && await Popup.show.confirm(`${type} ${actionName}`, `<p>A ${type.toLowerCase()} with the same name already exists:<br />${existing}</p>Do you want to overwrite it?`);
     if (!overwrite) {
         toastr.warning(`${type} ${actionName.toLowerCase()} cancelled. A ${type.toLowerCase()} with the same name already exists:<br />${existing}`, `${type} ${actionName}`, { escapeHtml: false });
         return false;

@@ -1,3 +1,5 @@
+@import url('./popup-safari-fix.css');
+
 dialog {
     color: var(--SmartThemeBodyColor);
 }
@@ -14,6 +16,10 @@ dialog {
     display: flex;
     flex-direction: column;
 
+    max-height: calc(100svh - 2em);
+    max-width: calc(100svw - 2em);
+    min-height: fit-content;
+
     /* Overflow visible so elements (like toasts) can appear outside of the dialog. '.popup-body' is hiding overflow for the real content. */
     overflow: visible;
 
@@ -21,8 +27,17 @@ dialog {
     backface-visibility: hidden;
     transform: translateZ(0);
     -webkit-font-smoothing: subpixel-antialiased;
+
+    /* Variables setup */
+    --popup-animation-speed: var(--animation-duration-slow);
 }
 
+/** Popup styles applied to the main popup */
+.popup--animation-fast { --popup-animation-speed: var(--animation-duration); }
+.popup--animation-slow { --popup-animation-speed: var(--animation-duration-slow); }
+.popup--animation-none { --popup-animation-speed: 0ms; }
+
+/* Styling of main popup elements */
 .popup .popup-body {
     display: flex;
     flex-direction: column;
@@ -54,11 +69,11 @@ dialog {
 
 /* Opening animation */
 .popup[opening] {
-    animation: pop-in var(--animation-duration-slow) ease-in-out;
+    animation: pop-in var(--popup-animation-speed) ease-in-out;
 }
 
 .popup[opening]::backdrop {
-    animation: fade-in var(--animation-duration-slow) ease-in-out;
+    animation: fade-in var(--popup-animation-speed) ease-in-out;
 }
 
 /* Open state of the dialog */
@@ -72,13 +87,18 @@ dialog {
     background-color: var(--black30a);
 }
 
+body.no-blur .popup[open]::backdrop {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
 /* Closing animation */
 .popup[closing] {
-    animation: pop-out var(--animation-duration-slow) ease-in-out;
+    animation: pop-out var(--popup-animation-speed) ease-in-out;
 }
 
 .popup[closing]::backdrop {
-    animation: fade-out var(--animation-duration-slow) ease-in-out;
+    animation: fade-out var(--popup-animation-speed) ease-in-out;
 }
 
 .popup #toast-container {
@@ -90,6 +110,24 @@ dialog {
 
     /* Fix text align, popups are centered by default. toasts should not. */
     text-align: left;
+}
+
+.popup-crop-wrap {
+    margin: 10px auto;
+    max-height: 75vh;
+    max-height: 75svh;
+    max-width: 100%;
+}
+
+.popup-crop-wrap img {
+    max-width: 100%;
+    /* This rule is very important, please do not ignore this! */
+}
+
+.popup-inputs {
+    margin-top: 10px;
+    font-size: smaller;
+    opacity: 0.7;
 }
 
 .popup-input {
@@ -109,19 +147,16 @@ dialog {
 
 .menu_button.popup-button-ok {
     background-color: var(--crimson70a);
-    cursor: pointer;
 }
 
 .menu_button.popup-button-ok:hover {
     background-color: var(--crimson-hover);
 }
 
-.menu_button.popup-button-custom {
-    /* Custom buttons should not scale to smallest size, otherwise they will always break to multiline */
-    width: unset;
-}
-
 .popup-controls .menu_button {
+    /* Popup buttons should not scale to smallest size, otherwise they will always break to multiline if multiple words */
+    width: unset;
+
     /* Fix weird animation issue with fonts on brightness filter */
     backface-visibility: hidden;
     transform: translateZ(0);
@@ -130,5 +165,20 @@ dialog {
 
 .popup-controls .menu_button:hover:focus-visible {
     filter: brightness(1.3) saturate(1.3);
+}
+
+.popup .popup-button-close {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 24px;
+    height: 24px;
+    font-size: 20px;
+    padding: 2px 3px 3px 2px;
+
+    filter: brightness(0.8);
+
+    /* Fix weird animation issue with font-scaling during popup open */
+    backface-visibility: hidden;
 }
 

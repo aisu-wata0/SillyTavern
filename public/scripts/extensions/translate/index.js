@@ -1,7 +1,6 @@
 export { translate };
 
 import {
-    callPopup,
     eventSource,
     event_types,
     getRequestHeaders,
@@ -11,6 +10,7 @@ import {
     updateMessageBlock,
 } from '../../../script.js';
 import { extension_settings, getContext, renderExtensionTemplateAsync } from '../../extensions.js';
+import { POPUP_TYPE, callGenericPopup } from '../../popup.js';
 import { findSecret, secret_state, writeSecret } from '../../secrets.js';
 import { SlashCommand } from '../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../slash-commands/SlashCommandArgument.js';
@@ -476,6 +476,7 @@ async function onTranslateInputMessageClick() {
     const toast = toastr.info('Input Message is translating', 'Please wait...');
     const translatedText = await translate(textarea.value, extension_settings.translate.internal_language);
     textarea.value = translatedText;
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
     toastr.clear(toast);
 }
 
@@ -509,7 +510,7 @@ async function onTranslateChatClick() {
 
 async function onTranslationsClearClick() {
     const popupHtml = await renderExtensionTemplateAsync('translate', 'deleteConfirmation');
-    const confirm = await callPopup(popupHtml, 'confirm');
+    const confirm = await callGenericPopup(popupHtml, POPUP_TYPE.CONFIRM);
 
     if (!confirm) {
         return;
@@ -569,10 +570,10 @@ window['translate'] = translate;
 
 jQuery(async () => {
     const html = await renderExtensionTemplateAsync('translate', 'index');
-
     const buttonHtml = await renderExtensionTemplateAsync('translate', 'buttons');
-    $('#extensionsMenu').append(buttonHtml);
-    $('#extensions_settings2').append(html);
+
+    $('#translate_wand_container').append(buttonHtml);
+    $('#translation_container').append(html);
     $('#translate_chat').on('click', onTranslateChatClick);
     $('#translate_input_message').on('click', onTranslateInputMessageClick);
     $('#translation_clear').on('click', onTranslationsClearClick);
@@ -597,7 +598,7 @@ jQuery(async () => {
     $(document).on('click', '.mes_translate', onMessageTranslateClick);
     $('#translate_key_button').on('click', async () => {
         const optionText = $('#translation_provider option:selected').text();
-        const key = await callPopup(`<h3>${optionText} API Key</h3>`, 'input');
+        const key = await callGenericPopup(`<h3>${optionText} API Key</h3>`, POPUP_TYPE.INPUT);
 
         if (key == false) {
             return;
@@ -620,7 +621,7 @@ jQuery(async () => {
         const secretKey = extension_settings.translate.provider + '_url';
         const savedUrl = secret_state[secretKey] ? await findSecret(secretKey) : '';
 
-        const url = await callPopup(popupText, 'input', savedUrl);
+        const url = await callGenericPopup(popupText, POPUP_TYPE.INPUT, savedUrl);
 
         if (url == false || url == '') {
             return;
