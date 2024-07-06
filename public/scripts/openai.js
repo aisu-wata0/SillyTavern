@@ -1463,8 +1463,8 @@ for (let i = 0; i < drawerTogglers.length; i++) {
 const absoluteRPGAdventureUrl = 'https://aisu-wata-ara.hf.space';
 // const absoluteRPGAdventureUrl = 'http://127.0.0.1:7860';
 
-// const votingUrl = "";
-const votingUrl = "http://localhost:7861";
+const votingUrl = "";
+// const votingUrl = "http://localhost:7861";
 
 
 let ARA = {
