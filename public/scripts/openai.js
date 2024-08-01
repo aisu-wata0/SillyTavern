@@ -3106,6 +3106,8 @@ async function ARA_getResult(lastReply, chat_id, generate_data_prev, signal = nu
         ARA_summary_preemptive(data.game);
         return data;
     } catch (err) {
+        let errorMsg = ARA_msg_suffix + 'Failed getting game results from game server: ';
+        toastr.error(errorMsg + String(err));
         console.error(err.toString());
     }
     return {};
@@ -3676,14 +3678,14 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
                 generate_data = data.generate_data;
             }
         } catch (error) {
-            console.error(error);
-            let errorMsg = ARA_msg_suffix + 'Failed on promptAbsoluteRPGAdventure: ';
+            let errorMsg = ARA_msg_suffix + 'Failed getting prompt from game server: ';
+            toastr.error(errorMsg + String(error));
             if (error.stack) {
                 errorMsg += error.stack.toString();
             } else {
                 errorMsg += String(error);
             }
-            console.error(errorMsg);
+            console.error(errorMsg, error);
             throw new Error(errorMsg);
         }
     }
