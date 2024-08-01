@@ -45,7 +45,7 @@ import { FILTER_TYPES } from './filters.js';
 import { PARSER_FLAG, SlashCommandParser } from './slash-commands/SlashCommandParser.js';
 import { SlashCommand } from './slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from './slash-commands/SlashCommandArgument.js';
-import { AUTOCOMPLETE_WIDTH } from './autocomplete/AutoComplete.js';
+import { AUTOCOMPLETE_SELECT_KEY, AUTOCOMPLETE_WIDTH } from './autocomplete/AutoComplete.js';
 import { SlashCommandEnumValue, enumTypes } from './slash-commands/SlashCommandEnumValue.js';
 import { commonEnumProviders, enumIcons } from './slash-commands/SlashCommandCommonEnumsProvider.js';
 import { POPUP_TYPE, callGenericPopup } from './popup.js';
@@ -246,6 +246,7 @@ let power_user = {
         example_separator: defaultExampleSeparator,
         use_stop_strings: true,
         allow_jailbreak: false,
+        names_as_stop_strings: true,
     },
 
     personas: {},
@@ -280,6 +281,7 @@ let power_user = {
                 left: AUTOCOMPLETE_WIDTH.CHAT,
                 right: AUTOCOMPLETE_WIDTH.CHAT,
             },
+            select: AUTOCOMPLETE_SELECT_KEY.TAB + AUTOCOMPLETE_SELECT_KEY.ENTER,
         },
         parser: {
             /**@type {Object.<PARSER_FLAG,boolean>} */
@@ -351,6 +353,7 @@ const contextControls = [
     { id: 'context_chat_start', property: 'chat_start', isCheckbox: false, isGlobalSetting: false },
     { id: 'context_use_stop_strings', property: 'use_stop_strings', isCheckbox: true, isGlobalSetting: false, defaultValue: false },
     { id: 'context_allow_jailbreak', property: 'allow_jailbreak', isCheckbox: true, isGlobalSetting: false, defaultValue: false },
+    { id: 'context_names_as_stop_strings', property: 'names_as_stop_strings', isCheckbox: true, isGlobalSetting: false, defaultValue: true },
 
     // Existing power user settings
     { id: 'always-force-name2-checkbox', property: 'always_force_name2', isCheckbox: true, isGlobalSetting: true, defaultValue: true },
@@ -1496,6 +1499,9 @@ function loadPowerUserSettings(settings, data) {
             if (power_user.stscript.autocomplete.style === undefined) {
                 power_user.stscript.autocomplete.style = power_user.stscript.autocomplete_style || defaultStscript.autocomplete.style;
             }
+            if (power_user.stscript.autocomplete.select === undefined) {
+                power_user.stscript.autocomplete.select = defaultStscript.autocomplete.select;
+            }
         }
         if (power_user.stscript.parser === undefined) {
             power_user.stscript.parser = defaultStscript.parser;
@@ -1660,6 +1666,7 @@ function loadPowerUserSettings(settings, data) {
     $('#stscript_matching').val(power_user.stscript.matching ?? 'fuzzy');
     $('#stscript_autocomplete_style').val(power_user.stscript.autocomplete.style ?? 'theme');
     document.body.setAttribute('data-stscript-style', power_user.stscript.autocomplete.style);
+    $('#stscript_autocomplete_select').val(power_user.stscript.autocomplete.select ?? (AUTOCOMPLETE_SELECT_KEY.TAB + AUTOCOMPLETE_SELECT_KEY.ENTER));
     $('#stscript_parser_flag_strict_escaping').prop('checked', power_user.stscript.parser.flags[PARSER_FLAG.STRICT_ESCAPING] ?? false);
     $('#stscript_parser_flag_replace_getvar').prop('checked', power_user.stscript.parser.flags[PARSER_FLAG.REPLACE_GETVAR] ?? false);
     $('#stscript_autocomplete_font_scale').val(power_user.stscript.autocomplete.font.scale ?? defaultStscript.autocomplete.font.scale);
@@ -2182,7 +2189,7 @@ function validateStoryString(storyString, params) {
     validateMissingField('personality');
     validateMissingField('persona');
     validateMissingField('scenario');
-    validateMissingField('system');
+    // validateMissingField('system');
     validateMissingField('wiBefore', 'loreBefore');
     validateMissingField('wiAfter', 'loreAfter');
 
@@ -2975,7 +2982,13 @@ function setAvgBG() {
     return '';
 }
 
-async function setThemeCallback(_, text) {
+async function setThemeCallback(_, themeName) {
+    if (!themeName) {
+        // allow reporting of the theme name if called without args
+        // for use in ST Scripts via pipe
+        return power_user.theme;
+    }
+
     // @ts-ignore
     const fuse = new Fuse(themes, {
         keys: [
@@ -2983,12 +2996,12 @@ async function setThemeCallback(_, text) {
         ],
     });
 
-    const results = fuse.search(text);
-    console.debug('Theme fuzzy search results for ' + text, results);
+    const results = fuse.search(themeName);
+    console.debug('Theme fuzzy search results for ' + themeName, results);
     const theme = results[0]?.item;
 
     if (!theme) {
-        toastr.warning(`Could not find theme with name: ${text}`);
+        toastr.warning(`Could not find theme with name: ${themeName}`);
         return;
     }
 
@@ -3335,10 +3348,11 @@ $(document).ready(() => {
 
     });
 
-    $('#chat_width_slider').on('input', function (e) {
+    $('#chat_width_slider').on('input', function (e, data) {
+        const applyMode = data?.forced ? 'forced' : 'normal';
         power_user.chat_width = Number(e.target.value);
         localStorage.setItem(storage_keys.chat_width, power_user.chat_width);
-        applyChatWidth();
+        applyChatWidth(applyMode);
         setHotswapsDebounced();
     });
 
@@ -3364,11 +3378,12 @@ $(document).ready(() => {
         saveSettingsDebounced();
     });
 
-    $('input[name="font_scale"]').on('input', async function (e) {
+    $('input[name="font_scale"]').on('input', async function (e, data) {
+        const applyMode = data?.forced ? 'forced' : 'normal';
         power_user.font_scale = Number(e.target.value);
         $('#font_scale_counter').val(power_user.font_scale);
         localStorage.setItem(storage_keys.font_scale, power_user.font_scale);
-        await applyFontScale();
+        await applyFontScale(applyMode);
         saveSettingsDebounced();
     });
 
@@ -3850,6 +3865,12 @@ $(document).ready(() => {
         saveSettingsDebounced();
     });
 
+    $('#stscript_autocomplete_select').on('change', function () {
+        const value = $(this).find(':selected').val();
+        power_user.stscript.autocomplete.select = parseInt(String(value));
+        saveSettingsDebounced();
+    });
+
     $('#stscript_autocomplete_font_scale').on('input', function () {
         const value = $(this).val();
         $('#stscript_autocomplete_font_scale_counter').val(value);
@@ -4018,6 +4039,7 @@ $(document).ready(() => {
             ),
         ],
         helpString: 'Enter message deletion mode, and auto-deletes last N messages if numeric argument is provided.',
+        returns: 'The text of the deleted messages.',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'cut',
@@ -4066,13 +4088,30 @@ $(document).ready(() => {
         callback: setThemeCallback,
         unnamedArgumentList: [
             SlashCommandArgument.fromProps({
-                description: 'name',
+                description: 'theme name',
                 typeList: [ARGUMENT_TYPE.STRING],
-                isRequired: true,
                 enumProvider: () => themes.map(theme => new SlashCommandEnumValue(theme.name)),
             }),
         ],
-        helpString: 'sets a UI theme by name',
+        helpString: `
+        <div>
+            Sets a UI theme by name.
+        </div>
+        <div>
+            If no theme name is is provided, this will return the currently active theme.
+        </div>
+        <div>
+            <strong>Example:</strong>
+            <ul>
+                <li>
+                    <pre><code>/theme Cappuccino</code></pre>
+                </li>
+                <li>
+                    <pre><code>/theme</code></pre>
+                </li>
+            </ul>
+        </div>
+    `,
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'movingui',
