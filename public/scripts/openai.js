@@ -1968,6 +1968,7 @@ function loadAbsoluteRPGAdventureSettings(settings, data) {
         console.info(ARA_msg_suffix, "ARA_local.loaded");
     } else {
         ARA_configReset();
+        ARA_settingsSetText(ARA_config_default_txt);
     }
 }
 
@@ -3686,8 +3687,6 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
                 errorMsg += String(error);
             }
             console.error(errorMsg);
-            console.error(error);
-            console.error(error.stack);
             throw new Error(errorMsg, { cause: error });
         }
     }
