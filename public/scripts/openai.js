@@ -1413,15 +1413,18 @@ function checkQuotaError(data) {
     }
 }
 
-async function fetchWithTimeout(url, ms, post) {
-    if (!ms) {
-        ms = 60000;
-    }
+async function fetchWithTimeout(
+    /** @type {string | URL | globalThis.Request} */
+    url,
+    /** @type {RequestInit} */
+    init,
+    ms = 60000,
+) {
     const timeout = new Promise((resolve, reject) => {
         setTimeout(reject, ms, 'Timeout');
     });
 
-    const response = fetch(url, post);
+    const response = fetch(url, init);
 
     return Promise.race([
         response,
@@ -2130,6 +2133,14 @@ function cleanUrl(url) {
     return url;
 }
 
+function element_add_download_on_click(element, data, filename, type) {
+    var file = new Blob([data], {type: type});
+    let url = URL.createObjectURL(file);
+    element.href = url;
+    element.download = filename;
+    console.log(ARA_msg_suffix, "Added download to element:", element, "filename", filename, "type", type, "url", url, "file", file, "data", data);
+}
+
 const ARAonLoad = () => {
     let redirect_url = 'http://localhost:8000';
 
@@ -2716,6 +2727,26 @@ async function ARA_get() {
     return ARA;
 }
 
+function get_document_css() {
+    return [...document.styleSheets]
+        .map(styleSheet => {
+            try {
+                return [...styleSheet.cssRules]
+                    .map(rule => rule.cssText)
+                    .join('');
+            } catch (e) {
+                console.log('Access to stylesheet %s is denied. Ignoring...', styleSheet.href);
+            }
+        })
+        .filter(Boolean)
+        .join('\n');
+}
+
+function sheetHtmlBuilds(ARA_sheet_el) {
+    const outerHTML = ARA_sheet_el.outerHTML;
+    const css = get_document_css();
+    return `<style>\n${css}\n</style>\n\n${outerHTML}`;
+}
 
 function ARA_showSheet(data) {
     if (data.game?.sheet?.render?.text) {
@@ -2724,11 +2755,21 @@ function ARA_showSheet(data) {
         try {
             ARA_sheet_el.innerHTML = formatTextToHtml(sheet_text).outerHTML;
             HTMLElementCodeHighlight(ARA_sheet_el);
+
+            ARA_local.latest_chat_id_sheet = data.game.chat_id;
+            
+            const ARA_sheet_download_el = document.querySelector('#ARA-sheet-download');
+            if (ARA_sheet_download_el != null) {
+                element_add_download_on_click(
+                    ARA_sheet_download_el,
+                    sheetHtmlBuilds(ARA_sheet_el),
+                    `Absolute RPG - Status Sheet ${data.game.chat_id || ""} ${Date.now()}.html`,
+                    'text/html',
+                )
+            }
         } catch (err) {
             console.error(err);
-            const nl_regex = /\n|\r\n|\n\r|\r/gm;
-            let sheetHtml = sheet_text.replace(nl_regex, '<br>');
-            ARA_sheet_el.innerHTML = sheetHtml;
+            ARA_sheet_el.innerHTML = sheet_text;
         }
     }
 }
@@ -2966,8 +3007,9 @@ async function ARA_prompt(generate_data, chat_id, signal) {
         method: 'POST',
         body: JSON.stringify(body),
         headers: getRequestHeaders(),
+        signal,
     };
-    const res = await fetchWithTimeout(ARA_local.config.url + '/prompt', ARA_local.config.request_timeout_ms, post);
+    const res = await fetchWithTimeout(ARA_local.config.url + '/prompt', post, ARA_local.config.request_timeout_ms, );
     let data = await res.json();
     if (data.game && data.game.error) {
         console.trace(ARA_msg_suffix, 'Error:', data.game.error);
@@ -3101,7 +3143,7 @@ async function ARA_getResult(lastReply, chat_id, generate_data_prev, signal = nu
         headers: getRequestHeaders(),
     };
     try {
-        const res = await fetchWithTimeout(ARA_local.config.url + '/getResult', ARA_local.config.request_result_timeout_ms, post);
+        const res = await fetchWithTimeout(ARA_local.config.url + '/getResult', post, ARA_local.config.request_result_timeout_ms);
         const data = await res.json();
         ARA_show(data);
         ARA_summary_preemptive(data.game);
@@ -3734,7 +3776,7 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
                 yield { text, swipes: swipes, logprobs: parseChatCompletionLogprobs(parsed) };
             }
             if (power_user.absoluteRPGAdventure) {
-                const data = await ARA_getResult(text, chat_id, generate_data_prev, signal);
+                const data = await ARA_getResult(text, chat_id, generate_data_prev, null);
                 if (data?.game?.lastReply) {
                     yield { text: data.game.lastReply, swipes: swipes };
                 }
