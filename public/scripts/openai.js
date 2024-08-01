@@ -2969,7 +2969,7 @@ async function ARA_prompt(generate_data, chat_id, signal) {
     const res = await fetchWithTimeout(ARA_local.config.url + '/prompt', ARA_local.config.request_timeout_ms, post);
     let data = await res.json();
     if (data.game && data.game.error) {
-        console.trace('Error:', ARA_msg_suffix, data.game.error);
+        console.trace(ARA_msg_suffix, 'Error:', data.game.error);
         return data;
     }
     if (data.game) {
@@ -3685,8 +3685,10 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
             } else {
                 errorMsg += String(error);
             }
-            console.error(errorMsg, error);
-            throw new Error(errorMsg);
+            console.error(errorMsg);
+            console.error(error);
+            console.error(error.stack);
+            throw new Error(errorMsg, { cause: error });
         }
     }
 
