@@ -1,11 +1,11 @@
 const express = require('express');
 const fetch = require('node-fetch').default;
-const Readable = require('stream').Readable;
 
 const { jsonParser } = require('../../express-common');
 const { CHAT_COMPLETION_SOURCES, GEMINI_SAFETY, BISON_SAFETY, OPENROUTER_HEADERS } = require('../../constants');
 const { forwardFetchResponse, getConfigValue, tryParse, uuidv4, mergeObjectWithYaml, excludeKeysByYaml, color } = require('../../util');
-const { convertClaudeMessages, convertGooglePrompt, convertTextCompletionPrompt, convertCohereMessages, convertMistralMessages, convertCohereTools } = require('../../prompt-converters');
+const { convertClaudeMessages, convertGooglePrompt, convertTextCompletionPrompt, convertCohereMessages, convertMistralMessages, convertCohereTools, convertAI21Messages } = require('../../prompt-converters');
+const CohereStream = require('../../cohere-stream');
 
 const { readSecret, SECRET_KEYS } = require('../secrets');
 const { getTokenizerModel, getSentencepiceTokenizer, getTiktokenTokenizer, sentencepieceTokenizers, TEXT_COMPLETION_MODELS } = require('../tokenizers');
@@ -18,6 +18,8 @@ const API_PERPLEXITY = 'https://api.perplexity.ai';
 const API_GROQ = 'https://api.groq.com/openai/v1';
 const API_MAKERSUITE = 'https://generativelanguage.googleapis.com';
 const API_01AI = 'https://api.01.ai/v1';
+const API_BLOCKENTROPY = 'https://api.blockentropy.ai/v1';
+const API_AI21 = 'https://api.ai21.com/studio/v1';
 
 /**
  * Applies a post-processing step to the generated messages.
@@ -39,52 +41,30 @@ function postProcessPrompt(messages, type, charName, userName) {
 /**
  * Ollama strikes back. Special boy #2's steaming routine.
  * Wrap this abomination into proper SSE stream, again.
- * @param {import('node-fetch').Response} jsonStream JSON stream
+ * @param {Response} jsonStream JSON stream
  * @param {import('express').Request} request Express request
  * @param {import('express').Response} response Express response
  * @returns {Promise<any>} Nothing valuable
  */
 async function parseCohereStream(jsonStream, request, response) {
     try {
-        let partialData = '';
-        jsonStream.body.on('data', (data) => {
-            const chunk = data.toString();
-            partialData += chunk;
-            while (true) {
-                let json;
-                try {
-                    json = JSON.parse(partialData);
-                } catch (e) {
-                    break;
-                }
-                if (json.message) {
-                    const message = json.message || 'Unknown error';
-                    const chunk = { error: { message: message } };
-                    response.write(`data: ${JSON.stringify(chunk)}\n\n`);
-                    partialData = '';
-                    break;
-                } else if (json.event_type === 'text-generation') {
-                    const text = json.text || '';
-                    const chunk = { choices: [{ text }] };
-                    response.write(`data: ${JSON.stringify(chunk)}\n\n`);
-                    partialData = '';
-                } else {
-                    partialData = '';
-                    break;
-                }
+        const stream = new CohereStream({ stream: jsonStream.body, eventShape: { type: 'json', messageTerminator: '\n' } });
+
+        for await (const json of stream.iterMessages()) {
+            if (json.message) {
+                const message = json.message || 'Unknown error';
+                const chunk = { error: { message: message } };
+                response.write(`data: ${JSON.stringify(chunk)}\n\n`);
+            } else if (json.event_type === 'text-generation') {
+                const text = json.text || '';
+                const chunk = { choices: [{ text }] };
+                response.write(`data: ${JSON.stringify(chunk)}\n\n`);
             }
-        });
+        }
 
-        request.socket.on('close', function () {
-            if (jsonStream.body instanceof Readable) jsonStream.body.destroy();
-            response.end();
-        });
-
-        jsonStream.body.on('end', () => {
-            console.log('Streaming request finished');
-            response.write('data: [DONE]\n\n');
-            response.end();
-        });
+        console.log('Streaming request finished');
+        response.write('data: [DONE]\n\n');
+        response.end();
     } catch (error) {
         console.log('Error forwarding streaming response:', error);
         if (!response.headersSent) {
@@ -104,6 +84,7 @@ async function sendClaudeRequest(request, response) {
     const apiUrl = new URL(request.body.reverse_proxy || API_CLAUDE).toString();
     const apiKey = request.body.reverse_proxy ? request.body.proxy_password : readSecret(request.user.directories, SECRET_KEYS.CLAUDE);
     const divider = '-'.repeat(process.stdout.columns);
+    const enableSystemPromptCache = getConfigValue('claude.enableSystemPromptCache', false);
 
     if (!apiKey) {
         console.log(color.red(`Claude API key is missing.\n${divider}`));
@@ -117,8 +98,8 @@ async function sendClaudeRequest(request, response) {
             controller.abort();
         });
         const additionalHeaders = {};
-        let use_system_prompt = (request.body.model.startsWith('claude-2') || request.body.model.startsWith('claude-3')) && request.body.claude_use_sysprompt;
-        let converted_prompt = convertClaudeMessages(request.body.messages, request.body.assistant_prefill, use_system_prompt, request.body.human_sysprompt_message, request.body.char_name, request.body.user_name);
+        const useSystemPrompt = (request.body.model.startsWith('claude-2') || request.body.model.startsWith('claude-3')) && request.body.claude_use_sysprompt;
+        const convertedPrompt = convertClaudeMessages(request.body.messages, request.body.assistant_prefill, useSystemPrompt, request.body.human_sysprompt_message, request.body.char_name, request.body.user_name);
         // Add custom stop sequences
         const stopSequences = [];
         if (Array.isArray(request.body.stop)) {
@@ -126,7 +107,7 @@ async function sendClaudeRequest(request, response) {
         }
 
         const requestBody = {
-            messages: converted_prompt.messages,
+            messages: convertedPrompt.messages,
             model: request.body.model,
             max_tokens: request.body.max_tokens,
             stop_sequences: stopSequences,
@@ -135,13 +116,15 @@ async function sendClaudeRequest(request, response) {
             top_k: request.body.top_k,
             stream: request.body.stream,
         };
-        if (use_system_prompt) {
-            requestBody.system = converted_prompt.systemPrompt;
+        if (useSystemPrompt) {
+            requestBody.system = enableSystemPromptCache
+                ? [{ type: 'text', text: convertedPrompt.systemPrompt, cache_control: { type: 'ephemeral' } }]
+                : convertedPrompt.systemPrompt;
         }
         if (Array.isArray(request.body.tools) && request.body.tools.length > 0) {
             // Claude doesn't do prefills on function calls, and doesn't allow empty messages
-            if (converted_prompt.messages.length && converted_prompt.messages[converted_prompt.messages.length - 1].role === 'assistant') {
-                converted_prompt.messages.push({ role: 'user', content: '.' });
+            if (convertedPrompt.messages.length && convertedPrompt.messages[convertedPrompt.messages.length - 1].role === 'assistant') {
+                convertedPrompt.messages.push({ role: 'user', content: '.' });
             }
             additionalHeaders['anthropic-beta'] = 'tools-2024-05-16';
             requestBody.tool_choice = { type: request.body.tool_choice === 'required' ? 'any' : 'auto' };
@@ -149,6 +132,9 @@ async function sendClaudeRequest(request, response) {
                 .filter(tool => tool.type === 'function')
                 .map(tool => tool.function)
                 .map(fn => ({ name: fn.name, description: fn.description, input_schema: fn.parameters }));
+        }
+        if (enableSystemPromptCache) {
+            additionalHeaders['anthropic-beta'] = 'prompt-caching-2024-07-31';
         }
         console.log('Claude request:', requestBody);
 
@@ -226,7 +212,7 @@ async function sendScaleRequest(request, response) {
 
         if (!generateResponse.ok) {
             console.log(`Scale API returned error: ${generateResponse.status} ${generateResponse.statusText} ${await generateResponse.text()}`);
-            return response.status(generateResponse.status).send({ error: true });
+            return response.status(500).send({ error: true });
         }
 
         const generateResponseJson = await generateResponse.json();
@@ -252,7 +238,7 @@ async function sendMakerSuiteRequest(request, response) {
     const apiKey = request.body.reverse_proxy ? request.body.proxy_password : readSecret(request.user.directories, SECRET_KEYS.MAKERSUITE);
 
     if (!request.body.reverse_proxy && !apiKey) {
-        console.log('MakerSuite API key is missing.');
+        console.log('Google AI Studio API key is missing.');
         return response.status(400).send({ error: true });
     }
 
@@ -271,7 +257,7 @@ async function sendMakerSuiteRequest(request, response) {
     };
 
     function getGeminiBody() {
-        const should_use_system_prompt = ['gemini-1.5-flash-latest', 'gemini-1.5-pro-latest'].includes(model) && request.body.use_makersuite_sysprompt;
+        const should_use_system_prompt = (model.includes('gemini-1.5-flash') || model.includes('gemini-1.5-pro')) && request.body.use_makersuite_sysprompt;
         const prompt = convertGooglePrompt(request.body.messages, model, should_use_system_prompt, request.body.char_name, request.body.user_name);
         let body = {
             contents: prompt.contents,
@@ -319,7 +305,7 @@ async function sendMakerSuiteRequest(request, response) {
     }
 
     const body = isGemini ? getGeminiBody() : getBisonBody();
-    console.log('MakerSuite request:', body);
+    console.log('Google AI Studio request:', body);
 
     try {
         const controller = new AbortController();
@@ -355,7 +341,7 @@ async function sendMakerSuiteRequest(request, response) {
             }
         } else {
             if (!generateResponse.ok) {
-                console.log(`MakerSuite API returned error: ${generateResponse.status} ${generateResponse.statusText} ${await generateResponse.text()}`);
+                console.log(`Google AI Studio API returned error: ${generateResponse.status} ${generateResponse.statusText} ${await generateResponse.text()}`);
                 return response.status(generateResponse.status).send({ error: true });
             }
 
@@ -363,7 +349,7 @@ async function sendMakerSuiteRequest(request, response) {
 
             const candidates = generateResponseJson?.candidates;
             if (!candidates || candidates.length === 0) {
-                let message = 'MakerSuite API returned no candidate';
+                let message = 'Google AI Studio API returned no candidate';
                 console.log(message, generateResponseJson);
                 if (generateResponseJson?.promptFeedback?.blockReason) {
                     message += `\nPrompt was blocked due to : ${generateResponseJson.promptFeedback.blockReason}`;
@@ -374,19 +360,19 @@ async function sendMakerSuiteRequest(request, response) {
             const responseContent = candidates[0].content ?? candidates[0].output;
             const responseText = typeof responseContent === 'string' ? responseContent : responseContent?.parts?.[0]?.text;
             if (!responseText) {
-                let message = 'MakerSuite Candidate text empty';
+                let message = 'Google AI Studio Candidate text empty';
                 console.log(message, generateResponseJson);
                 return response.send({ error: { message } });
             }
 
-            console.log('MakerSuite response:', responseText);
+            console.log('Google AI Studio response:', responseText);
 
             // Wrap it back to OAI format
             const reply = { choices: [{ 'message': { 'content': responseText } }] };
             return response.send(reply);
         }
     } catch (error) {
-        console.log('Error communicating with MakerSuite API: ', error);
+        console.log('Error communicating with Google AI Studio API: ', error);
         if (!response.headersSent) {
             return response.status(500).send({ error: true });
         }
@@ -406,6 +392,16 @@ async function sendAI21Request(request, response) {
     request.socket.on('close', function () {
         controller.abort();
     });
+    const convertedPrompt = convertAI21Messages(request.body.messages, request.body.char_name, request.body.user_name);
+    const body = {
+        messages: convertedPrompt,
+        model: request.body.model,
+        max_tokens: request.body.max_tokens,
+        temperature: request.body.temperature,
+        top_p: request.body.top_p,
+        stop: request.body.stop,
+        stream: request.body.stream,
+    };
     const options = {
         method: 'POST',
         headers: {
@@ -413,59 +409,35 @@ async function sendAI21Request(request, response) {
             'content-type': 'application/json',
             Authorization: `Bearer ${readSecret(request.user.directories, SECRET_KEYS.AI21)}`,
         },
-        body: JSON.stringify({
-            numResults: 1,
-            maxTokens: request.body.max_tokens,
-            minTokens: 0,
-            temperature: request.body.temperature,
-            topP: request.body.top_p,
-            stopSequences: request.body.stop_tokens,
-            topKReturn: request.body.top_k,
-            frequencyPenalty: {
-                scale: request.body.frequency_penalty * 100,
-                applyToWhitespaces: false,
-                applyToPunctuations: false,
-                applyToNumbers: false,
-                applyToStopwords: false,
-                applyToEmojis: false,
-            },
-            presencePenalty: {
-                scale: request.body.presence_penalty,
-                applyToWhitespaces: false,
-                applyToPunctuations: false,
-                applyToNumbers: false,
-                applyToStopwords: false,
-                applyToEmojis: false,
-            },
-            countPenalty: {
-                scale: request.body.count_pen,
-                applyToWhitespaces: false,
-                applyToPunctuations: false,
-                applyToNumbers: false,
-                applyToStopwords: false,
-                applyToEmojis: false,
-            },
-            prompt: request.body.messages,
-        }),
+        body: JSON.stringify(body),
         signal: controller.signal,
     };
 
-    fetch(`https://api.ai21.com/studio/v1/${request.body.model}/complete`, options)
-        .then(r => r.json())
-        .then(r => {
-            if (r.completions === undefined) {
-                console.log(r);
-            } else {
-                console.log(r.completions[0].data.text);
-            }
-            const reply = { choices: [{ 'message': { 'content': r.completions?.[0]?.data?.text } }] };
-            return response.send(reply);
-        })
-        .catch(err => {
-            console.error(err);
-            return response.send({ error: true });
-        });
+    console.log('AI21 request:', body);
 
+    try {
+        const generateResponse = await fetch(API_AI21 + '/chat/completions', options);
+        if (request.body.stream) {
+            forwardFetchResponse(generateResponse, response);
+        } else {
+            if (!generateResponse.ok) {
+                const errorText = await generateResponse.text();
+                console.log(`AI21 API returned error: ${generateResponse.status} ${generateResponse.statusText} ${errorText}`);
+                const errorJson = tryParse(errorText) ?? { error: true };
+                return response.status(500).send(errorJson);
+            }
+            const generateResponseJson = await generateResponse.json();
+            console.log('AI21 response:', generateResponseJson);
+            return response.send(generateResponseJson);
+        }
+    } catch (error) {
+        console.log('Error communicating with AI21 API: ', error);
+        if (!response.headersSent) {
+            response.send({ error: true });
+        } else {
+            response.end();
+        }
+    }
 }
 
 /**
@@ -524,10 +496,10 @@ async function sendMistralAIRequest(request, response) {
             forwardFetchResponse(generateResponse, response);
         } else {
             if (!generateResponse.ok) {
-                console.log(`MistralAI API returned error: ${generateResponse.status} ${generateResponse.statusText} ${await generateResponse.text()}`);
-                // a 401 unauthorized response breaks the frontend auth, so return a 500 instead. prob a better way of dealing with this.
-                // 401s are already handled by the streaming processor and dont pop up an error toast, that should probably be fixed too.
-                return response.status(generateResponse.status === 401 ? 500 : generateResponse.status).send({ error: true });
+                const errorText = await generateResponse.text();
+                console.log(`MistralAI API returned error: ${generateResponse.status} ${generateResponse.statusText} ${errorText}`);
+                const errorJson = tryParse(errorText) ?? { error: true };
+                return response.status(500).send(errorJson);
             }
             const generateResponseJson = await generateResponse.json();
             console.log('MistralAI response:', generateResponseJson);
@@ -566,7 +538,8 @@ async function sendCohereRequest(request, response) {
         const connectors = [];
         const tools = [];
 
-        if (request.body.websearch) {
+        const canDoWebSearch = !String(request.body.model).includes('c4ai-aya');
+        if (request.body.websearch && canDoWebSearch) {
             connectors.push({
                 id: 'web-search',
             });
@@ -600,6 +573,11 @@ async function sendCohereRequest(request, response) {
             search_queries_only: false,
         };
 
+        const canDoSafetyMode = String(request.body.model).endsWith('08-2024');
+        if (canDoSafetyMode) {
+            requestBody.safety_mode = 'NONE';
+        }
+
         console.log('Cohere request:', requestBody);
 
         const config = {
@@ -616,15 +594,15 @@ async function sendCohereRequest(request, response) {
         const apiUrl = API_COHERE + '/chat';
 
         if (request.body.stream) {
-            const stream = await fetch(apiUrl, config);
+            const stream = await global.fetch(apiUrl, config);
             parseCohereStream(stream, request, response);
         } else {
             const generateResponse = await fetch(apiUrl, config);
             if (!generateResponse.ok) {
-                console.log(`Cohere API returned error: ${generateResponse.status} ${generateResponse.statusText} ${await generateResponse.text()}`);
-                // a 401 unauthorized response breaks the frontend auth, so return a 500 instead. prob a better way of dealing with this.
-                // 401s are already handled by the streaming processor and dont pop up an error toast, that should probably be fixed too.
-                return response.status(generateResponse.status === 401 ? 500 : generateResponse.status).send({ error: true });
+                const errorText = await generateResponse.text();
+                console.log(`Cohere API returned error: ${generateResponse.status} ${generateResponse.statusText} ${errorText}`);
+                const errorJson = tryParse(errorText) ?? { error: true };
+                return response.status(500).send(errorJson);
             }
             const generateResponseJson = await generateResponse.json();
             console.log('Cohere response:', generateResponseJson);
@@ -674,6 +652,10 @@ router.post('/status', jsonParser, async function (request, response_getstatus_o
     } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.ZEROONEAI) {
         api_url = API_01AI;
         api_key_openai = readSecret(request.user.directories, SECRET_KEYS.ZEROONEAI);
+        headers = {};
+    } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.BLOCKENTROPY) {
+        api_url = API_BLOCKENTROPY;
+        api_key_openai = readSecret(request.user.directories, SECRET_KEYS.BLOCKENTROPY);
         headers = {};
     } else {
         console.log('This chat completion source is not supported yet.');
@@ -941,6 +923,11 @@ router.post('/generate', jsonParser, function (request, response) {
         apiKey = readSecret(request.user.directories, SECRET_KEYS.ZEROONEAI);
         headers = {};
         bodyParams = {};
+    } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.BLOCKENTROPY) {
+        apiUrl = API_BLOCKENTROPY;
+        apiKey = readSecret(request.user.directories, SECRET_KEYS.BLOCKENTROPY);
+        headers = {};
+        bodyParams = {};
     } else {
         console.log('This chat completion source is not supported yet.');
         return response.status(400).send({ error: true });
@@ -978,6 +965,7 @@ router.post('/generate', jsonParser, function (request, response) {
         'model': request.body.model,
         'temperature': request.body.temperature,
         'max_tokens': request.body.max_tokens,
+        'max_completion_tokens': request.body.max_completion_tokens,
         'stream': request.body.stream,
         'presence_penalty': request.body.presence_penalty,
         'frequency_penalty': request.body.frequency_penalty,

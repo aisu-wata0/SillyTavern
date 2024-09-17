@@ -44,6 +44,7 @@ export class QuickReply {
     /**@type {boolean}*/ executeOnAi = false;
     /**@type {boolean}*/ executeOnChatChange = false;
     /**@type {boolean}*/ executeOnGroupMemberDraft = false;
+    /**@type {boolean}*/ executeOnNewChat = false;
     /**@type {string}*/ automationId = '';
 
     /**@type {function}*/ onExecute;
@@ -359,7 +360,7 @@ export class QuickReply {
                         del.classList.add('fa-solid');
                         del.classList.add('fa-trash-can');
                         del.classList.add('redWarningBG');
-                        del.title = 'Remove Quick Reply\n---\nShit+Click to skip confirmation';
+                        del.title = 'Remove Quick Reply\n---\nShift+Click to skip confirmation';
                         del.addEventListener('click', async(evt)=>{
                             if (!evt.shiftKey) {
                                 const result = await Popup.show.confirm(
@@ -1058,6 +1059,13 @@ export class QuickReply {
             executeOnGroupMemberDraft.checked = this.executeOnGroupMemberDraft;
             executeOnGroupMemberDraft.addEventListener('click', ()=>{
                 this.executeOnGroupMemberDraft = executeOnGroupMemberDraft.checked;
+                this.updateContext();
+            });
+            /**@type {HTMLInputElement}*/
+            const executeOnNewChat = dom.querySelector('#qr--executeOnNewChat');
+            executeOnNewChat.checked = this.executeOnNewChat;
+            executeOnNewChat.addEventListener('click', ()=>{
+                this.executeOnNewChat = executeOnNewChat.checked;
                 this.updateContext();
             });
             /**@type {HTMLInputElement}*/
@@ -1896,6 +1904,7 @@ export class QuickReply {
             executeOnAi: this.executeOnAi,
             executeOnChatChange: this.executeOnChatChange,
             executeOnGroupMemberDraft: this.executeOnGroupMemberDraft,
+            executeOnNewChat: this.executeOnNewChat,
             automationId: this.automationId,
         };
     }

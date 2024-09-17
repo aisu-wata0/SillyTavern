@@ -4,6 +4,7 @@ const readline = require('readline');
 const express = require('express');
 const sanitize = require('sanitize-filename');
 const writeFileAtomicSync = require('write-file-atomic').sync;
+const _ = require('lodash');
 
 const { jsonParser, urlencodedParser } = require('../express-common');
 const { getConfigValue, humanizedISO8601DateTime, tryParse, generateTimestamp, removeOldBackups } = require('../util');
@@ -33,6 +34,27 @@ function backupChat(directory, name, chat) {
         console.log(`Could not backup chat for ${name}`, err);
     }
 }
+
+const backupFunctions = new Map();
+
+/**
+ * Gets a backup function for a user.
+ * @param {string} handle User handle
+ * @returns {function(string, string, string): void} Backup function
+ */
+function getBackupFunction(handle) {
+    const throttleInterval = getConfigValue('chatBackupThrottleInterval', 10_000);
+    if (!backupFunctions.has(handle)) {
+        backupFunctions.set(handle, _.throttle(backupChat, throttleInterval, { leading: true, trailing: true }));
+    }
+    return backupFunctions.get(handle);
+}
+
+process.on('exit', () => {
+    for (const func of backupFunctions.values()) {
+        func.flush();
+    }
+});
 
 /**
  * Imports a chat from Ooba's format.
@@ -144,10 +166,10 @@ router.post('/save', jsonParser, function (request, response) {
         const directoryName = String(request.body.avatar_url).replace('.png', '');
         const chatData = request.body.chat;
         const jsonlData = chatData.map(JSON.stringify).join('\n');
-        const fileName = `${sanitize(String(request.body.file_name))}.jsonl`;
-        const filePath = path.join(request.user.directories.chats, directoryName, fileName);
+        const fileName = `${String(request.body.file_name)}.jsonl`;
+        const filePath = path.join(request.user.directories.chats, directoryName, sanitize(fileName));
         writeFileAtomicSync(filePath, jsonlData, 'utf8');
-        backupChat(request.user.directories.backups, directoryName, jsonlData);
+        getBackupFunction(request.user.profile.handle)(request.user.directories.backups, directoryName, jsonlData);
         return response.send({ result: 'ok' });
     } catch (error) {
         response.send(error);
@@ -171,14 +193,15 @@ router.post('/get', jsonParser, function (request, response) {
             return response.send({});
         }
 
-        const fileName = path.join(directoryPath, `${sanitize(String(request.body.file_name))}.jsonl`);
-        const chatFileExists = fs.existsSync(fileName);
+        const fileName = `${String(request.body.file_name)}.jsonl`;
+        const filePath = path.join(directoryPath, sanitize(fileName));
+        const chatFileExists = fs.existsSync(filePath);
 
         if (!chatFileExists) {
             return response.send({});
         }
 
-        const data = fs.readFileSync(fileName, 'utf8');
+        const data = fs.readFileSync(filePath, 'utf8');
         const lines = data.split('\n');
 
         // Iterate through the array of strings and parse each line as JSON
@@ -199,8 +222,9 @@ router.post('/rename', jsonParser, async function (request, response) {
     const pathToFolder = request.body.is_group
         ? request.user.directories.groupChats
         : path.join(request.user.directories.chats, String(request.body.avatar_url).replace('.png', ''));
-    const pathToOriginalFile = path.join(pathToFolder, request.body.original_file);
-    const pathToRenamedFile = path.join(pathToFolder, request.body.renamed_file);
+    const pathToOriginalFile = path.join(pathToFolder, sanitize(request.body.original_file));
+    const pathToRenamedFile = path.join(pathToFolder, sanitize(request.body.renamed_file));
+    const sanitizedFileName = path.parse(pathToRenamedFile).name;
     console.log('Old chat name', pathToOriginalFile);
     console.log('New chat name', pathToRenamedFile);
 
@@ -212,32 +236,22 @@ router.post('/rename', jsonParser, async function (request, response) {
     fs.copyFileSync(pathToOriginalFile, pathToRenamedFile);
     fs.rmSync(pathToOriginalFile);
     console.log('Successfully renamed.');
-    return response.send({ ok: true });
+    return response.send({ ok: true, sanitizedFileName });
 });
 
 router.post('/delete', jsonParser, function (request, response) {
-    if (!request.body) {
-        console.log('no request body seen');
-        return response.sendStatus(400);
-    }
-
-    if (request.body.chatfile !== sanitize(request.body.chatfile)) {
-        console.error('Malicious chat name prevented');
-        return response.sendStatus(403);
-    }
-
     const dirName = String(request.body.avatar_url).replace('.png', '');
-    const fileName = path.join(request.user.directories.chats, dirName, sanitize(String(request.body.chatfile)));
-    const chatFileExists = fs.existsSync(fileName);
+    const fileName = String(request.body.chatfile);
+    const filePath = path.join(request.user.directories.chats, dirName, sanitize(fileName));
+    const chatFileExists = fs.existsSync(filePath);
 
     if (!chatFileExists) {
-        console.log(`Chat file not found '${fileName}'`);
+        console.log(`Chat file not found '${filePath}'`);
         return response.sendStatus(400);
-    } else {
-        fs.rmSync(fileName);
-        console.log('Deleted chat file: ' + fileName);
     }
 
+    fs.rmSync(filePath);
+    console.log('Deleted chat file: ' + filePath);
     return response.send('ok');
 });
 
@@ -454,7 +468,7 @@ router.post('/group/save', jsonParser, (request, response) => {
     let chat_data = request.body.chat;
     let jsonlData = chat_data.map(JSON.stringify).join('\n');
     writeFileAtomicSync(pathToFile, jsonlData, 'utf8');
-    backupChat(request.user.directories.backups, String(id), jsonlData);
+    getBackupFunction(request.user.profile.handle)(request.user.directories.backups, String(id), jsonlData);
     return response.send({ ok: true });
 });
 

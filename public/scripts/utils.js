@@ -4,6 +4,7 @@ import { isMobile } from './RossAscends-mods.js';
 import { collapseNewlines } from './power-user.js';
 import { debounce_timeout } from './constants.js';
 import { Popup, POPUP_RESULT, POPUP_TYPE } from './popup.js';
+import { SlashCommandClosure } from './slash-commands/SlashCommandClosure.js';
 
 /**
  * Pagination status string template.
@@ -30,6 +31,74 @@ export function isValidUrl(value) {
         return true;
     } catch (_) {
         return false;
+    }
+}
+
+/**
+ * Converts string to a value of a given type. Includes pythonista-friendly aliases.
+ * @param {string|SlashCommandClosure} value String value
+ * @param {string} type Type to convert to
+ * @returns {any} Converted value
+ */
+export function convertValueType(value, type) {
+    if (value instanceof SlashCommandClosure || typeof type !== 'string') {
+        return value;
+    }
+
+    switch (type.trim().toLowerCase()) {
+        case 'string':
+        case 'str':
+            return String(value);
+
+        case 'null':
+            return null;
+
+        case 'undefined':
+        case 'none':
+            return undefined;
+
+        case 'number':
+            return Number(value);
+
+        case 'int':
+            return parseInt(value, 10);
+
+        case 'float':
+            return parseFloat(value);
+
+        case 'boolean':
+        case 'bool':
+            return isTrueBoolean(value);
+
+        case 'list':
+        case 'array':
+            try {
+                const parsedArray = JSON.parse(value);
+                if (Array.isArray(parsedArray)) {
+                    return parsedArray;
+                }
+                // The value is not an array
+                return [];
+            } catch {
+                return [];
+            }
+
+        case 'object':
+        case 'dict':
+        case 'dictionary':
+            try {
+                const parsedObject = JSON.parse(value);
+                if (typeof parsedObject === 'object') {
+                    return parsedObject;
+                }
+                // The value is not an object
+                return {};
+            } catch {
+                return {};
+            }
+
+        default:
+            return value;
     }
 }
 
@@ -334,12 +403,12 @@ export function debouncedThrottle(func, limit = 300) {
     let last, deferTimer;
     let db = debounce(func);
 
-    return function() {
+    return function () {
         let now = +new Date, args = arguments;
-        if(!last || (last && now < last + limit)) {
+        if (!last || (last && now < last + limit)) {
             clearTimeout(deferTimer);
             db.apply(this, args);
-            deferTimer = setTimeout(function() {
+            deferTimer = setTimeout(function () {
                 last = now;
                 func.apply(this, args);
             }, limit);
@@ -1367,6 +1436,15 @@ export function uuidv4() {
     });
 }
 
+/**
+ * Collapses multiple spaces in a strings into one.
+ * @param {string} s String to process
+ * @returns {string} String with collapsed spaces
+ */
+export function collapseSpaces(s) {
+    return s.replace(/\s+/g, ' ').trim();
+}
+
 function postProcessText(text, collapse = true) {
     // Remove carriage returns
     text = text.replace(/\r/g, '');
@@ -1728,20 +1806,24 @@ export function select2ModifyOptions(element, items, { select = false, changeEve
     /** @type {Select2Option[]} */
     const dataItems = items.map(x => typeof x === 'string' ? { id: getSelect2OptionId(x), text: x } : x);
 
-    const existingValues = [];
+    const optionsToSelect = [];
+    const newOptions = [];
+
     dataItems.forEach(item => {
         // Set the value, creating a new option if necessary
         if (element.find('option[value=\'' + item.id + '\']').length) {
-            if (select) existingValues.push(item.id);
+            if (select) optionsToSelect.push(item.id);
         } else {
             // Create a DOM Option and optionally pre-select by default
             var newOption = new Option(item.text, item.id, select, select);
             // Append it to the select
-            element.append(newOption);
-            if (select) element.trigger('change', changeEventArgs);
+            newOptions.push(newOption);
+            if (select) optionsToSelect.push(item.id);
         }
-        if (existingValues.length) element.val(existingValues).trigger('change', changeEventArgs);
     });
+
+    element.append(newOptions);
+    if (optionsToSelect.length) element.val(optionsToSelect).trigger('change', changeEventArgs);
 }
 
 /**
@@ -1930,13 +2012,46 @@ export function getFreeName(name, list, numberFormatter = (n) => ` #${n}`) {
     return `${name}${numberFormatter(counter)}`;
 }
 
+
+/**
+ * Toggles the visibility of a drawer by changing the display style of its content.
+ * This function skips the usual drawer animation.
+ *
+ * @param {HTMLElement} drawer - The drawer element to toggle
+ * @param {boolean} [expand=true] - Whether to expand or collapse the drawer
+ */
+export function toggleDrawer(drawer, expand = true) {
+    /** @type {HTMLElement} */
+    const icon = drawer.querySelector('.inline-drawer-icon');
+    /** @type {HTMLElement} */
+    const content = drawer.querySelector('.inline-drawer-content');
+
+    if (expand) {
+        icon.classList.remove('up', 'fa-circle-chevron-up');
+        icon.classList.add('down', 'fa-circle-chevron-down');
+        content.style.display = 'block';
+    } else {
+        icon.classList.remove('down', 'fa-circle-chevron-down');
+        icon.classList.add('up', 'fa-circle-chevron-up');
+        content.style.display = 'none';
+    }
+
+    // Set the height of "autoSetHeight" textareas within the inline-drawer to their scroll height
+    if (!CSS.supports('field-sizing', 'content')) {
+        content.querySelectorAll('textarea.autoSetHeight').forEach(resetScrollHeight);
+    }
+}
+
 export async function fetchFaFile(name) {
     const style = document.createElement('style');
     style.innerHTML = await (await fetch(`/css/${name}`)).text();
     document.head.append(style);
     const sheet = style.sheet;
     style.remove();
-    return [...sheet.cssRules].filter(it=>it.style?.content).map(it=>it.selectorText.split('::').shift().slice(1));
+    return [...sheet.cssRules]
+        .filter(rule => rule.style?.content)
+        .map(rule => rule.selectorText.split(/,\s*/).map(selector => selector.split('::').shift().slice(1)))
+    ;
 }
 export async function fetchFa() {
     return [...new Set((await Promise.all([
@@ -1961,8 +2076,8 @@ export async function showFontAwesomePicker(customList = null) {
                 qry.type = 'search';
                 qry.placeholder = 'Filter icons';
                 qry.autofocus = true;
-                const qryDebounced = debounce(()=>{
-                    const result = faList.filter(it=>it.includes(qry.value));
+                const qryDebounced = debounce(() => {
+                    const result = faList.filter(fa => fa.find(className => className.includes(qry.value.toLowerCase())));
                     for (const fa of faList) {
                         if (!result.includes(fa)) {
                             fas[fa].classList.add('hidden');
@@ -1983,10 +2098,10 @@ export async function showFontAwesomePicker(customList = null) {
                     fas[fa] = opt;
                     opt.classList.add('menu_button');
                     opt.classList.add('fa-solid');
-                    opt.classList.add(fa);
-                    opt.title = fa.slice(3);
+                    opt.classList.add(fa[0]);
+                    opt.title = fa.map(it => it.slice(3)).join(', ');
                     opt.dataset.result = POPUP_RESULT.AFFIRMATIVE.toString();
-                    opt.addEventListener('click', () => value = fa);
+                    opt.addEventListener('click', () => value = fa[0]);
                     grid.append(opt);
                 }
             }

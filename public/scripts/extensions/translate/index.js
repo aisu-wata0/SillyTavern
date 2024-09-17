@@ -10,7 +10,7 @@ import {
     updateMessageBlock,
 } from '../../../script.js';
 import { extension_settings, getContext, renderExtensionTemplateAsync } from '../../extensions.js';
-import { POPUP_TYPE, callGenericPopup } from '../../popup.js';
+import { POPUP_RESULT, POPUP_TYPE, callGenericPopup } from '../../popup.js';
 import { findSecret, secret_state, writeSecret } from '../../secrets.js';
 import { SlashCommand } from '../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../slash-commands/SlashCommandArgument.js';
@@ -598,9 +598,20 @@ jQuery(async () => {
     $(document).on('click', '.mes_translate', onMessageTranslateClick);
     $('#translate_key_button').on('click', async () => {
         const optionText = $('#translation_provider option:selected').text();
-        const key = await callGenericPopup(`<h3>${optionText} API Key</h3>`, POPUP_TYPE.INPUT);
+        const key = await callGenericPopup(`<h3>${optionText} API Key</h3>`, POPUP_TYPE.INPUT, '', {
+            customButtons: [{
+                text: 'Remove Key',
+                appendAtEnd: true,
+                result: POPUP_RESULT.NEGATIVE,
+                action: async () => {
+                    await writeSecret(extension_settings.translate.provider, '');
+                    toastr.success('API Key removed');
+                    $('#translate_key_button').toggleClass('success', !!secret_state[extension_settings.translate.provider]);
+                },
+            }],
+        });
 
-        if (key == false) {
+        if (!key) {
             return;
         }
 
@@ -621,9 +632,20 @@ jQuery(async () => {
         const secretKey = extension_settings.translate.provider + '_url';
         const savedUrl = secret_state[secretKey] ? await findSecret(secretKey) : '';
 
-        const url = await callGenericPopup(popupText, POPUP_TYPE.INPUT, savedUrl);
+        const url = await callGenericPopup(popupText, POPUP_TYPE.INPUT, savedUrl,{
+            customButtons: [{
+                text: 'Remove URL',
+                appendAtEnd: true,
+                result: POPUP_RESULT.NEGATIVE,
+                action: async () => {
+                    await writeSecret(secretKey, '');
+                    toastr.success('API URL removed');
+                    $('#translate_url_button').toggleClass('success', !!secret_state[secretKey]);
+                },
+            }],
+        });
 
-        if (url == false || url == '') {
+        if (!url) {
             return;
         }
 

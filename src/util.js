@@ -34,8 +34,9 @@ function getConfig() {
         CACHED_CONFIG = config;
         return config;
     } catch (error) {
-        console.warn('Failed to read config.yaml');
-        return {};
+        console.error(color.red('FATAL: Failed to read config.yaml. Please check the file for syntax errors.'));
+        console.error(error.message);
+        process.exit(1);
     }
 }
 
@@ -298,8 +299,8 @@ const color = {
  * @returns {string} A UUIDv4 string
  */
 function uuidv4() {
-    if ('randomUUID' in crypto) {
-        return crypto.randomUUID();
+    if ('crypto' in global && 'randomUUID' in global.crypto) {
+        return global.crypto.randomUUID();
     }
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
         const r = Math.random() * 16 | 0;
@@ -382,14 +383,31 @@ function removeOldBackups(directory, prefix) {
     }
 }
 
-function getImages(path) {
+/**
+ * Get a list of images in a directory.
+ * @param {string} directoryPath Path to the directory containing the images
+ * @param {'name' | 'date'} sortBy Sort images by name or date
+ * @returns {string[]} List of image file names
+ */
+function getImages(directoryPath, sortBy = 'name') {
+    function getSortFunction() {
+        switch (sortBy) {
+            case 'name':
+                return Intl.Collator().compare;
+            case 'date':
+                return (a, b) => fs.statSync(path.join(directoryPath, a)).mtimeMs - fs.statSync(path.join(directoryPath, b)).mtimeMs;
+            default:
+                return (_a, _b) => 0;
+        }
+    }
+
     return fs
-        .readdirSync(path)
+        .readdirSync(directoryPath)
         .filter(file => {
             const type = mime.lookup(file);
             return type && type.startsWith('image/');
         })
-        .sort(Intl.Collator().compare);
+        .sort(getSortFunction());
 }
 
 /**
@@ -610,6 +628,39 @@ class Cache {
     }
 }
 
+/**
+ * Removes color formatting from a text string.
+ * @param {string} text Text with color formatting
+ * @returns {string} Text without color formatting
+ */
+function removeColorFormatting(text) {
+    // ANSI escape codes for colors are usually in the format \x1b[<codes>m
+    return text.replace(/\x1b\[\d{1,2}(;\d{1,2})*m/g, '');
+}
+
+/**
+ * Gets a separator string repeated n times.
+ * @param {number} n Number of times to repeat the separator
+ * @returns {string} Separator string
+ */
+function getSeparator(n) {
+    return '='.repeat(n);
+}
+
+/**
+ * Checks if the string is a valid URL.
+ * @param {string} url String to check
+ * @returns {boolean} If the URL is valid
+ */
+function isValidUrl(url) {
+    try {
+        new URL(url);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
 module.exports = {
     getConfig,
     getConfigValue,
@@ -637,4 +688,7 @@ module.exports = {
     trimV1,
     Cache,
     makeHttp2Request,
+    removeColorFormatting,
+    getSeparator,
+    isValidUrl,
 };

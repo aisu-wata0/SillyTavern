@@ -29,7 +29,8 @@
             </label>
             <label for="sd_expand" class="checkbox_label" data-i18n="[title]sd_expand" title="Automatically extend prompts using text generation model">
                 <input id="sd_expand" type="checkbox" />
-                <span data-i18n="sd_expand_txt">Auto-enhance prompts</span>
+                <span data-i18n="sd_expand_txt">Auto-extend prompts</span>
+                <span class="right_menu_button fa-solid fa-triangle-exclamation" data-i18n="[title]sd_expand_warning" title="May produce unexpected results. Manual prompt editing is recommended."></span>
             </label>
             <label for="sd_snap" class="checkbox_label" data-i18n="[title]sd_snap" title="Snap generation requests with a forced aspect ratio (portraits, backgrounds) to the nearest known resolution, while trying to preserve the absolute pixel counts (recommended for SDXL).">
                 <input id="sd_snap" type="checkbox" />
@@ -37,9 +38,11 @@
             </label>
             <label for="sd_source" data-i18n="Source">Source</label>
             <select id="sd_source">
+                <option value="blockentropy">Block Entropy</option>
                 <option value="comfy">ComfyUI</option>
                 <option value="drawthings">DrawThings HTTP API</option>
                 <option value="extras">Extras API (local / remote)</option>
+                <option value="huggingface">HuggingFace Inference API (serverless)</option>
                 <option value="novel">NovelAI Diffusion</option>
                 <option value="openai">OpenAI (DALL-E)</option>
                 <option value="pollinations">Pollinations</option>
@@ -80,6 +83,11 @@
                 <input id="sd_drawthings_auth" type="text" class="text_pole"  data-i18n="[placeholder]Example: username:password" placeholder="Example: username:password" value="" />
                 <!-- (Original Text)<b>Important:</b> run DrawThings app with HTTP API switch enabled in the UI! The server must be accessible from the SillyTavern host machine. -->
                 <i><b data-i18n="Important:">Important:</b></i><i data-i18n="sd_drawthings_auth_txt"> run DrawThings app with HTTP API switch enabled in the UI! The server must be accessible from the SillyTavern host machine.</i>
+            </div>
+            <div data-sd-source="huggingface">
+                <i>Hint: Save an API key in the Hugging Face (Text Completion) API settings to use it here.</i>
+                <label for="sd_huggingface_model_id" data-i18n="Model ID">Model ID</label>
+                <input id="sd_huggingface_model_id" type="text" class="text_pole"  data-i18n="[placeholder]e.g. black-forest-labs/FLUX.1-dev" placeholder="e.g. black-forest-labs/FLUX.1-dev" value="" />
             </div>
             <div data-sd-source="vlad">
                 <label for="sd_vlad_url">SD.Next API URL</label>
@@ -176,16 +184,10 @@
                     <a href="https://pollinations.ai">Pollinations.ai</a>
                 </p>
                 <div class="flex-container">
-                    <label class="flex1 checkbox_label" for="sd_pollinations_enhance">
+                    <label class="flex1 checkbox_label" for="sd_pollinations_enhance" title="Enables prompt enhancing (passes prompts through an LLM to add detail).">
                         <input id="sd_pollinations_enhance" type="checkbox" />
                         <span data-i18n="Enhance">
                             Enhance
-                        </span>
-                    </label>
-                    <label class="flex1 checkbox_label" for="sd_pollinations_refine">
-                        <input id="sd_pollinations_refine" type="checkbox" />
-                        <span data-i18n="Refine">
-                            Refine
                         </span>
                     </label>
                 </div>
@@ -378,7 +380,7 @@
                 </label>
             </div>
 
-            <div data-sd-source="novel,togetherai,pollinations,comfy,drawthings,vlad,auto,horde,extras,stability" class="marginTop5">
+            <div data-sd-source="novel,togetherai,pollinations,comfy,drawthings,vlad,auto,horde,extras,stability,blockentropy" class="marginTop5">
                 <label for="sd_seed">
                     <span data-i18n="Seed">Seed</span>
                     <small data-i18n="(-1 for random)">(-1 for random)</small>
@@ -400,16 +402,16 @@
                 </div>
             </div>
             <label for="sd_prompt_prefix" data-i18n="Common prompt prefix">Common prompt prefix</label>
-            <textarea id="sd_prompt_prefix" class="text_pole textarea_compact" data-i18n="[placeholder]sd_prompt_prefix_placeholder" placeholder="Use {prompt} to specify where the generated prompt will be inserted"></textarea>
+            <textarea id="sd_prompt_prefix" class="text_pole textarea_compact autoSetHeight" data-i18n="[placeholder]sd_prompt_prefix_placeholder" placeholder="Use {prompt} to specify where the generated prompt will be inserted"></textarea>
             <label for="sd_negative_prompt" data-i18n="Negative common prompt prefix">Negative common prompt prefix</label>
-            <textarea id="sd_negative_prompt" class="text_pole textarea_compact"></textarea>
+            <textarea id="sd_negative_prompt" class="text_pole textarea_compact autoSetHeight"></textarea>
             <div id="sd_character_prompt_block">
                 <label for="sd_character_prompt" data-i18n="Character-specific prompt prefix">Character-specific prompt prefix</label>
                 <small data-i18n="Won't be used in groups.">Won't be used in groups.</small>
-                <textarea id="sd_character_prompt" class="text_pole textarea_compact" data-i18n="[placeholder]sd_character_prompt_placeholder" placeholder="Any characteristics that describe the currently selected character. Will be added after a common prompt prefix.&#10;Example: female, green eyes, brown hair, pink shirt"></textarea>
+                <textarea id="sd_character_prompt" class="text_pole textarea_compact autoSetHeight" data-i18n="[placeholder]sd_character_prompt_placeholder" placeholder="Any characteristics that describe the currently selected character. Will be added after a common prompt prefix.&#10;Example: female, green eyes, brown hair, pink shirt"></textarea>
                 <label for="sd_character_negative_prompt" data-i18n="Character-specific negative prompt prefix">Character-specific negative prompt prefix</label>
                 <small data-i18n="Won't be used in groups.">Won't be used in groups.</small>
-                <textarea id="sd_character_negative_prompt" class="text_pole textarea_compact" data-i18n="[placeholder]sd_character_negative_prompt_placeholder" placeholder="Any characteristics that should not appear for the selected character. Will be added after a negative common prompt prefix.&#10;Example: jewellery, shoes, glasses"></textarea>
+                <textarea id="sd_character_negative_prompt" class="text_pole textarea_compact autoSetHeight" data-i18n="[placeholder]sd_character_negative_prompt_placeholder" placeholder="Any characteristics that should not appear for the selected character. Will be added after a negative common prompt prefix.&#10;Example: jewellery, shoes, glasses"></textarea>
                 <label for="sd_character_prompt_share" class="checkbox_label flexWrap marginTop5">
                     <input id="sd_character_prompt_share" type="checkbox" />
                     <span data-i18n="Shareable">

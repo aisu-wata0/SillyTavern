@@ -22,8 +22,8 @@ router.post('/caption-image', jsonParser, async (request, response) => {
                     { text: request.body.prompt },
                     {
                         inlineData: {
-                            mimeType: 'image/png', // It needs to specify a MIME type in data if it's not a PNG
-                            data: mimeType === 'image/png' ? base64Data : request.body.image,
+                            mimeType: mimeType,
+                            data: base64Data,
                         },
                     }],
             }],
@@ -44,7 +44,7 @@ router.post('/caption-image', jsonParser, async (request, response) => {
 
         if (!result.ok) {
             const error = await result.json();
-            console.log(`MakerSuite API returned error: ${result.status} ${result.statusText}`, error);
+            console.log(`Google AI Studio API returned error: ${result.status} ${result.statusText}`, error);
             return response.status(result.status).send({ error: true });
         }
 

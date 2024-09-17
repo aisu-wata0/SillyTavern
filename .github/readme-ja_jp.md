@@ -1,3 +1,6 @@
+> [!IMPORTANT]  
+> ここに掲載されている情報は、古かったり不完全であったりする可能性があります。最新の情報は英語版をご利用ください。
+
 [English](readme.md) | [中文](readme-zh_cn.md) | 日本語 | [Русский](readme-ru_ru.md)
 
 ![SillyTavern-Banner](https://github.com/SillyTavern/SillyTavern/assets/18619528/c2be4c3f-aada-4f64-87a3-ae35a68b61a4)
@@ -71,14 +74,13 @@ Tavern は単なるフロントエンドのUIであり、必要なハードウ�
 * ワールド情報サポート: 豊富な伝承を作成したり、キャラクターカードにトークンを保存したりできます
 * [OpenRouter](https://openrouter.ai) 各種 API(Claude、GPT-4/3.5 など)の接続
 * [Oobabooga's TextGen WebUI](https://github.com/oobabooga/text-generation-webui) API 接続
-* [AI Horde](https://horde.koboldai.net/) 接続
+* [AI Horde](https://aihorde.net/) 接続
 * プロンプト生成フォーマットの調整
 
 ## 拡張機能
 
-SillyTavern は拡張できるようになっており、[SillyTavern Extras API](https://github.com/SillyTavern/SillyTavern-extras) でいくつかの追加AIモジュールをホストしています
+SillyTavern は拡張できるようになっており。
 
-* 作者ノート/キャラクターバイアス
 * キャラクターの感情表現（スプライト）
 * チャット履歴の自動サマリー
 * チャットに画像を送り、AI が内容を解釈する

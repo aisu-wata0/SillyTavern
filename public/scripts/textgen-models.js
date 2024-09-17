@@ -12,6 +12,7 @@ let dreamGenModels = [];
 let vllmModels = [];
 let aphroditeModels = [];
 let featherlessModels = [];
+let tabbyModels = [];
 export let openRouterModels = [];
 
 /**
@@ -66,12 +67,37 @@ export async function loadOllamaModels(data) {
     }
 }
 
+export async function loadTabbyModels(data) {
+    if (!Array.isArray(data)) {
+        console.error('Invalid Tabby models data', data);
+        return;
+    }
+
+    tabbyModels = data;
+    tabbyModels.sort((a, b) => a.id.localeCompare(b.id));
+    tabbyModels.unshift({ id: '' });
+
+    if (!tabbyModels.find(x => x.id === textgen_settings.tabby_model)) {
+        textgen_settings.tabby_model = tabbyModels[0]?.id || '';
+    }
+
+    $('#tabby_model').empty();
+    for (const model of tabbyModels) {
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.text = model.id;
+        option.selected = model.id === textgen_settings.tabby_model;
+        $('#tabby_model').append(option);
+    }
+}
+
 export async function loadTogetherAIModels(data) {
     if (!Array.isArray(data)) {
         console.error('Invalid Together AI models data', data);
         return;
     }
 
+    data.sort((a, b) => a.name.localeCompare(b.name));
     togetherModels = data;
 
     if (!data.find(x => x.name === textgen_settings.togetherai_model)) {
@@ -99,6 +125,7 @@ export async function loadInfermaticAIModels(data) {
         return;
     }
 
+    data.sort((a, b) => a.id.localeCompare(b.id));
     infermaticAIModels = data;
 
     if (!data.find(x => x.id === textgen_settings.infermaticai_model)) {
@@ -151,6 +178,7 @@ export async function loadMancerModels(data) {
         return;
     }
 
+    data.sort((a, b) => a.name.localeCompare(b.name));
     mancerModels = data;
 
     if (!data.find(x => x.id === textgen_settings.mancer_model)) {
@@ -173,6 +201,7 @@ export async function loadOpenRouterModels(data) {
         return;
     }
 
+    data.sort((a, b) => a.name.localeCompare(b.name));
     openRouterModels = data;
 
     if (!data.find(x => x.id === textgen_settings.openrouter_model)) {
@@ -242,6 +271,7 @@ export async function loadFeatherlessModels(data) {
         return;
     }
 
+    data.sort((a, b) => a.id.localeCompare(b.id));
     featherlessModels = data;
 
     if (!data.find(x => x.id === textgen_settings.featherless_model)) {
@@ -262,6 +292,8 @@ function onFeatherlessModelSelect() {
     const modelId = String($('#featherless_model').val());
     textgen_settings.featherless_model = modelId;
     $('#api_button_textgenerationwebui').trigger('click');
+    const model = featherlessModels.find(x => x.id === modelId);
+    setGenerationParamsFromPreset({ max_length: model.context_length });
 }
 
 
@@ -300,6 +332,12 @@ function onDreamGenModelSelect() {
 function onOllamaModelSelect() {
     const modelId = String($('#ollama_model').val());
     textgen_settings.ollama_model = modelId;
+    $('#api_button_textgenerationwebui').trigger('click');
+}
+
+function onTabbyModelSelect() {
+    const modelId = String($('#tabby_model').val());
+    textgen_settings.tabby_model = modelId;
     $('#api_button_textgenerationwebui').trigger('click');
 }
 
@@ -427,6 +465,20 @@ function getAphroditeModelTemplate(option) {
     return $((`
         <div class="flex-container flexFlowColumn">
             <div><strong>${DOMPurify.sanitize(model.id)}</strong></div>
+        </div>
+    `));
+}
+
+function getFeatherlessModelTemplate(option) {
+    const model = featherlessModels.find(x => x.id === option?.element?.value);
+
+    if (!option.id || !model) {
+        return option.text;
+    }
+
+    return $((`
+        <div class="flex-container flexFlowColumn">
+            <div><strong>${DOMPurify.sanitize(model.name)}</strong> | <span>${model.context_length || '???'} tokens</span></div>
         </div>
     `));
 }
@@ -569,6 +621,9 @@ function calculateOpenRouterCost() {
 export function getCurrentOpenRouterModelTokenizer() {
     const modelId = textgen_settings.openrouter_model;
     const model = openRouterModels.find(x => x.id === modelId);
+    if (modelId?.includes('jamba')) {
+        return tokenizers.JAMBA;
+    }
     switch (model?.architecture?.tokenizer) {
         case 'Llama2':
             return tokenizers.LLAMA;
@@ -578,6 +633,14 @@ export function getCurrentOpenRouterModelTokenizer() {
             return tokenizers.YI;
         case 'Mistral':
             return tokenizers.MISTRAL;
+        case 'Gemini':
+            return tokenizers.GEMMA;
+        case 'Claude':
+            return tokenizers.CLAUDE;
+        case 'Cohere':
+            return tokenizers.COMMAND_R;
+        case 'Qwen':
+            return tokenizers.QWEN2;
         default:
             return tokenizers.OPENAI;
     }
@@ -597,7 +660,7 @@ export function getCurrentDreamGenModelTokenizer() {
     }
 }
 
-jQuery(function () {
+export function initTextGenModels() {
     $('#mancer_model').on('change', onMancerModelSelect);
     $('#model_togetherai_select').on('change', onTogetherModelSelect);
     $('#model_infermaticai_select').on('change', onInfermaticAIModelSelect);
@@ -609,6 +672,7 @@ jQuery(function () {
     $('#aphrodite_model').on('change', onAphroditeModelSelect);
     $('#featherless_model').on('change', onFeatherlessModelSelect);
     $('#tabby_download_model').on('click', downloadTabbyModel);
+    $('#tabby_model').on('change', onTabbyModelSelect);
 
     const providersSelect = $('.openrouter_providers');
     for (const provider of OPENROUTER_PROVIDERS) {
@@ -638,6 +702,13 @@ jQuery(function () {
             searchInputPlaceholder: 'Search models...',
             searchInputCssClass: 'text_pole',
             width: '100%',
+        });
+        $('#tabby_model').select2({
+            placeholder: '[Currently loaded]',
+            searchInputPlaceholder: 'Search models...',
+            searchInputCssClass: 'text_pole',
+            width: '100%',
+            allowClear: true,
         });
         $('#model_infermaticai_select').select2({
             placeholder: 'Select a model',
@@ -679,6 +750,7 @@ jQuery(function () {
             searchInputPlaceholder: 'Search models...',
             searchInputCssClass: 'text_pole',
             width: '100%',
+            templateResult: getFeatherlessModelTemplate,
         });
         providersSelect.select2({
             sorter: data => data.sort((a, b) => a.text.localeCompare(b.text)),
@@ -686,6 +758,7 @@ jQuery(function () {
             searchInputPlaceholder: 'Search providers...',
             searchInputCssClass: 'text_pole',
             width: '100%',
+            closeOnSelect: false,
         });
         providersSelect.on('select2:select', function (/** @type {any} */ evt) {
             const element = evt.params.data.element;
@@ -696,4 +769,4 @@ jQuery(function () {
             $(this).trigger('change');
         });
     }
-});
+}

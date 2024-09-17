@@ -30,6 +30,13 @@ import { textgen_types, textgenerationwebui_settings } from '../../textgen-setti
 import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../slash-commands/SlashCommandArgument.js';
+import { callGenericPopup, POPUP_RESULT, POPUP_TYPE } from '../../popup.js';
+import { generateWebLlmChatPrompt, isWebLlmSupported } from '../shared.js';
+
+/**
+ * @typedef {object} HashedMessage
+ * @property {string} text - The hashed message text
+ */
 
 const MODULE_NAME = 'vectors';
 
@@ -191,6 +198,11 @@ function splitByChunks(items) {
     return chunkedItems;
 }
 
+/**
+ * Summarizes messages using the Extras API method.
+ * @param {HashedMessage[]} hashedMessages Array of hashed messages
+ * @returns {Promise<HashedMessage[]>} Summarized messages
+ */
 async function summarizeExtra(hashedMessages) {
     for (const element of hashedMessages) {
         try {
@@ -222,6 +234,11 @@ async function summarizeExtra(hashedMessages) {
     return hashedMessages;
 }
 
+/**
+ * Summarizes messages using the main API method.
+ * @param {HashedMessage[]} hashedMessages Array of hashed messages
+ * @returns {Promise<HashedMessage[]>} Summarized messages
+ */
 async function summarizeMain(hashedMessages) {
     for (const element of hashedMessages) {
         element.text = await generateRaw(element.text, '', false, false, settings.summary_prompt);
@@ -230,12 +247,39 @@ async function summarizeMain(hashedMessages) {
     return hashedMessages;
 }
 
+/**
+ * Summarizes messages using WebLLM.
+ * @param {HashedMessage[]} hashedMessages Array of hashed messages
+ * @returns {Promise<HashedMessage[]>} Summarized messages
+ */
+async function summarizeWebLLM(hashedMessages) {
+    if (!isWebLlmSupported()) {
+        console.warn('Vectors: WebLLM is not supported');
+        return hashedMessages;
+    }
+
+    for (const element of hashedMessages) {
+        const messages = [{ role:'system', content: settings.summary_prompt }, { role:'user', content: element.text }];
+        element.text = await generateWebLlmChatPrompt(messages);
+    }
+
+    return hashedMessages;
+}
+
+/**
+ * Summarizes messages using the chosen method.
+ * @param {HashedMessage[]} hashedMessages Array of hashed messages
+ * @param {string} endpoint Type of endpoint to use
+ * @returns {Promise<HashedMessage[]>} Summarized messages
+ */
 async function summarize(hashedMessages, endpoint = 'main') {
     switch (endpoint) {
         case 'main':
             return await summarizeMain(hashedMessages);
         case 'extras':
             return await summarizeExtra(hashedMessages);
+        case 'webllm':
+            return await summarizeWebLLM(hashedMessages);
         default:
             console.error('Unsupported endpoint', endpoint);
     }
@@ -357,7 +401,7 @@ async function processFiles(chat) {
         const dataBankCollectionIds = await ingestDataBankAttachments();
 
         if (dataBankCollectionIds.length) {
-            const queryText = await getQueryText(chat);
+            const queryText = await getQueryText(chat, 'file');
             await injectDataBankChunks(queryText, dataBankCollectionIds);
         }
 
@@ -391,7 +435,7 @@ async function processFiles(chat) {
                 await vectorizeFile(fileText, fileName, collectionId, settings.chunk_size, settings.overlap_percent);
             }
 
-            const queryText = await getQueryText(chat);
+            const queryText = await getQueryText(chat, 'file');
             const fileChunks = await retrieveFileChunks(queryText, collectionId);
 
             message.mes = `${fileChunks}\n\n${message.mes}`;
@@ -552,7 +596,7 @@ async function rearrangeChat(chat) {
             return;
         }
 
-        const queryText = await getQueryText(chat);
+        const queryText = await getQueryText(chat, 'chat');
 
         if (queryText.length === 0) {
             console.debug('Vectors: No text to query');
@@ -639,15 +683,16 @@ const onChatEvent = debounce(async () => await moduleWorker.update(), debounce_t
 /**
  * Gets the text to query from the chat
  * @param {object[]} chat Chat messages
+ * @param {'file'|'chat'|'world-info'} initiator Initiator of the query
  * @returns {Promise<string>} Text to query
  */
-async function getQueryText(chat) {
+async function getQueryText(chat, initiator) {
     let queryText = '';
     let i = 0;
 
     let hashedMessages = chat.map(x => ({ text: String(substituteParams(x.mes)) }));
 
-    if (settings.summarize && settings.summarize_sent) {
+    if (initiator === 'chat' && settings.enabled_chats && settings.summarize && settings.summarize_sent) {
         hashedMessages = await summarize(hashedMessages, settings.summary_source);
     }
 
@@ -673,7 +718,7 @@ async function getQueryText(chat) {
 async function getSavedHashes(collectionId) {
     const response = await fetch('/api/vector/list', {
         method: 'POST',
-        headers: getRequestHeaders(),
+        headers: getVectorHeaders(),
         body: JSON.stringify({
             collectionId: collectionId,
             source: settings.source,
@@ -692,105 +737,48 @@ function getVectorHeaders() {
     const headers = getRequestHeaders();
     switch (settings.source) {
         case 'extras':
-            addExtrasHeaders(headers);
+            Object.assign(headers, {
+                'X-Extras-Url': extension_settings.apiUrl,
+                'X-Extras-Key': extension_settings.apiKey,
+            });
             break;
         case 'togetherai':
-            addTogetherAiHeaders(headers);
+            Object.assign(headers, {
+                'X-Togetherai-Model': extension_settings.vectors.togetherai_model,
+            });
             break;
         case 'openai':
-            addOpenAiHeaders(headers);
+            Object.assign(headers, {
+                'X-OpenAI-Model': extension_settings.vectors.openai_model,
+            });
             break;
         case 'cohere':
-            addCohereHeaders(headers);
+            Object.assign(headers, {
+                'X-Cohere-Model': extension_settings.vectors.cohere_model,
+            });
             break;
         case 'ollama':
-            addOllamaHeaders(headers);
+            Object.assign(headers, {
+                'X-Ollama-Model': extension_settings.vectors.ollama_model,
+                'X-Ollama-URL': textgenerationwebui_settings.server_urls[textgen_types.OLLAMA],
+                'X-Ollama-Keep': !!extension_settings.vectors.ollama_keep,
+            });
             break;
         case 'llamacpp':
-            addLlamaCppHeaders(headers);
+            Object.assign(headers, {
+                'X-LlamaCpp-URL': textgenerationwebui_settings.server_urls[textgen_types.LLAMACPP],
+            });
             break;
         case 'vllm':
-            addVllmHeaders(headers);
+            Object.assign(headers, {
+                'X-Vllm-URL': textgenerationwebui_settings.server_urls[textgen_types.VLLM],
+                'X-Vllm-Model': extension_settings.vectors.vllm_model,
+            });
             break;
         default:
             break;
     }
     return headers;
-}
-
-/**
- * Add headers for the Extras API source.
- * @param {object} headers Headers object
- */
-function addExtrasHeaders(headers) {
-    console.log(`Vector source is extras, populating API URL: ${extension_settings.apiUrl}`);
-    Object.assign(headers, {
-        'X-Extras-Url': extension_settings.apiUrl,
-        'X-Extras-Key': extension_settings.apiKey,
-    });
-}
-
-/**
- * Add headers for the TogetherAI API source.
- * @param {object} headers Headers object
- */
-function addTogetherAiHeaders(headers) {
-    Object.assign(headers, {
-        'X-Togetherai-Model': extension_settings.vectors.togetherai_model,
-    });
-}
-
-/**
- * Add headers for the OpenAI API source.
- * @param {object} headers Header object
- */
-function addOpenAiHeaders(headers) {
-    Object.assign(headers, {
-        'X-OpenAI-Model': extension_settings.vectors.openai_model,
-    });
-}
-
-/**
- * Add headers for the Cohere API source.
- * @param {object} headers Header object
- */
-function addCohereHeaders(headers) {
-    Object.assign(headers, {
-        'X-Cohere-Model': extension_settings.vectors.cohere_model,
-    });
-}
-
-/**
- * Add headers for the Ollama API source.
- * @param {object} headers Header object
- */
-function addOllamaHeaders(headers) {
-    Object.assign(headers, {
-        'X-Ollama-Model': extension_settings.vectors.ollama_model,
-        'X-Ollama-URL': textgenerationwebui_settings.server_urls[textgen_types.OLLAMA],
-        'X-Ollama-Keep': !!extension_settings.vectors.ollama_keep,
-    });
-}
-
-/**
- * Add headers for the LlamaCpp API source.
- * @param {object} headers Header object
- */
-function addLlamaCppHeaders(headers) {
-    Object.assign(headers, {
-        'X-LlamaCpp-URL': textgenerationwebui_settings.server_urls[textgen_types.LLAMACPP],
-    });
-}
-
-/**
- * Add headers for the VLLM API source.
- * @param {object} headers Header object
- */
-function addVllmHeaders(headers) {
-    Object.assign(headers, {
-        'X-Vllm-URL': textgenerationwebui_settings.server_urls[textgen_types.VLLM],
-        'X-Vllm-Model': extension_settings.vectors.vllm_model,
-    });
 }
 
 /**
@@ -856,7 +844,7 @@ function throwIfSourceInvalid() {
 async function deleteVectorItems(collectionId, hashes) {
     const response = await fetch('/api/vector/delete', {
         method: 'POST',
-        headers: getRequestHeaders(),
+        headers: getVectorHeaders(),
         body: JSON.stringify({
             collectionId: collectionId,
             hashes: hashes,
@@ -942,7 +930,7 @@ async function purgeFileVectorIndex(fileUrl) {
 
         const response = await fetch('/api/vector/purge', {
             method: 'POST',
-            headers: getRequestHeaders(),
+            headers: getVectorHeaders(),
             body: JSON.stringify({
                 collectionId: collectionId,
             }),
@@ -971,7 +959,7 @@ async function purgeVectorIndex(collectionId) {
 
         const response = await fetch('/api/vector/purge', {
             method: 'POST',
-            headers: getRequestHeaders(),
+            headers: getVectorHeaders(),
             body: JSON.stringify({
                 collectionId: collectionId,
             }),
@@ -996,7 +984,7 @@ async function purgeAllVectorIndexes() {
     try {
         const response = await fetch('/api/vector/purge-all', {
             method: 'POST',
-            headers: getRequestHeaders(),
+            headers: getVectorHeaders(),
         });
 
         if (!response.ok) {
@@ -1008,6 +996,25 @@ async function purgeAllVectorIndexes() {
     } catch (error) {
         console.error('Vectors: Failed to purge all', error);
         toastr.error('Failed to purge all vector indexes', 'Purge failed');
+    }
+}
+
+async function isModelScopesEnabled() {
+    try {
+        const response = await fetch('/api/vector/scopes-enabled', {
+            method: 'GET',
+            headers: getVectorHeaders(),
+        });
+
+        if (!response.ok) {
+            return false;
+        }
+
+        const data = await response.json();
+        return data?.enabled ?? false;
+    } catch (error) {
+        console.error('Vectors: Failed to check model scopes', error);
+        return false;
     }
 }
 
@@ -1235,7 +1242,7 @@ async function activateWorldInfo(chat) {
     }
 
     // Perform a multi-query
-    const queryText = await getQueryText(chat);
+    const queryText = await getQueryText(chat, 'world-info');
 
     if (queryText.length === 0) {
         console.debug('Vectors: No text to query for WI');
@@ -1275,6 +1282,7 @@ jQuery(async () => {
     }
 
     Object.assign(settings, extension_settings.vectors);
+    const scopesEnabled = await isModelScopesEnabled();
 
     // Migrate from TensorFlow to Transformers
     settings.source = settings.source !== 'local' ? settings.source : 'transformers';
@@ -1299,39 +1307,58 @@ jQuery(async () => {
         saveSettingsDebounced();
         toggleSettings();
     });
-    $('#api_key_nomicai').on('change', () => {
-        const nomicKey = String($('#api_key_nomicai').val()).trim();
-        if (nomicKey.length) {
-            writeSecret(SECRET_KEYS.NOMICAI, nomicKey);
+    $('#api_key_nomicai').on('click', async () => {
+        const popupText = 'NomicAI API Key:';
+        const key = await callGenericPopup(popupText, POPUP_TYPE.INPUT, '', {
+            customButtons: [{
+                text: 'Remove Key',
+                appendAtEnd: true,
+                result: POPUP_RESULT.NEGATIVE,
+                action: async () => {
+                    await writeSecret(SECRET_KEYS.NOMICAI, '');
+                    toastr.success('API Key removed');
+                    $('#api_key_nomicai').toggleClass('success', !!secret_state[SECRET_KEYS.NOMICAI]);
+                    saveSettingsDebounced();
+                },
+            }],
+        });
+
+        if (!key) {
+            return;
         }
+
+        await writeSecret(SECRET_KEYS.NOMICAI, String(key));
+        $('#api_key_nomicai').toggleClass('success', !!secret_state[SECRET_KEYS.NOMICAI]);
+
+        toastr.success('API Key saved');
         saveSettingsDebounced();
     });
     $('#vectors_togetherai_model').val(settings.togetherai_model).on('change', () => {
-        $('#vectors_modelWarning').show();
+        !scopesEnabled && $('#vectors_modelWarning').show();
         settings.togetherai_model = String($('#vectors_togetherai_model').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
     $('#vectors_openai_model').val(settings.openai_model).on('change', () => {
-        $('#vectors_modelWarning').show();
+        !scopesEnabled && $('#vectors_modelWarning').show();
         settings.openai_model = String($('#vectors_openai_model').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
     $('#vectors_cohere_model').val(settings.cohere_model).on('change', () => {
-        $('#vectors_modelWarning').show();
+        !scopesEnabled && $('#vectors_modelWarning').show();
         settings.cohere_model = String($('#vectors_cohere_model').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
     $('#vectors_ollama_model').val(settings.ollama_model).on('input', () => {
-        $('#vectors_modelWarning').show();
+        !scopesEnabled && $('#vectors_modelWarning').show();
         settings.ollama_model = String($('#vectors_ollama_model').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
     });
     $('#vectors_vllm_model').val(settings.vllm_model).on('input', () => {
-        $('#vectors_modelWarning').show();
+        !scopesEnabled && $('#vectors_modelWarning').show();
         settings.vllm_model = String($('#vectors_vllm_model').val());
         Object.assign(extension_settings.vectors, settings);
         saveSettingsDebounced();
@@ -1531,9 +1558,7 @@ jQuery(async () => {
         $('#dialogue_popup_input').val(presetModel);
     });
 
-    const validSecret = !!secret_state[SECRET_KEYS.NOMICAI];
-    const placeholder = validSecret ? '✔️ Key saved' : '❌ Missing key';
-    $('#api_key_nomicai').attr('placeholder', placeholder);
+    $('#api_key_nomicai').toggleClass('success', !!secret_state[SECRET_KEYS.NOMICAI]);
 
     toggleSettings();
     eventSource.on(event_types.MESSAGE_DELETED, onChatEvent);

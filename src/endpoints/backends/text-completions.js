@@ -5,7 +5,7 @@ const Readable = require('stream').Readable;
 
 const { jsonParser } = require('../../express-common');
 const { TEXTGEN_TYPES, TOGETHERAI_KEYS, OLLAMA_KEYS, INFERMATICAI_KEYS, OPENROUTER_KEYS, VLLM_KEYS, DREAMGEN_KEYS, FEATHERLESS_KEYS } = require('../../constants');
-const { forwardFetchResponse, trimV1 } = require('../../util');
+const { forwardFetchResponse, trimV1, getConfigValue } = require('../../util');
 const { setAdditionalHeaders } = require('../../additional-headers');
 
 const router = express.Router();
@@ -137,6 +137,7 @@ router.post('/status', jsonParser, async function (request, response) {
         }
 
         const modelsReply = await fetch(url, args);
+        const isPossiblyLmStudio = modelsReply.headers.get('x-powered-by') === 'Express';
 
         if (!modelsReply.ok) {
             console.log('Models endpoint is offline.');
@@ -174,7 +175,7 @@ router.post('/status', jsonParser, async function (request, response) {
         // Set result to the first model ID
         result = modelIds[0] || 'Valid';
 
-        if (apiType === TEXTGEN_TYPES.OOBA) {
+        if (apiType === TEXTGEN_TYPES.OOBA && !isPossiblyLmStudio) {
             try {
                 const modelInfoUrl = baseUrl + '/v1/internal/model/info';
                 const modelInfoReply = await fetch(modelInfoUrl, args);
@@ -325,11 +326,12 @@ router.post('/generate', jsonParser, async function (request, response) {
         }
 
         if (request.body.api_type === TEXTGEN_TYPES.OLLAMA) {
+            const keepAlive = getConfigValue('ollama.keepAlive', -1);
             args.body = JSON.stringify({
                 model: request.body.model,
                 prompt: request.body.prompt,
                 stream: request.body.stream ?? false,
-                keep_alive: -1,
+                keep_alive: keepAlive,
                 raw: true,
                 options: _.pickBy(request.body, (_, key) => OLLAMA_KEYS.includes(key)),
             });
@@ -374,7 +376,9 @@ router.post('/generate', jsonParser, async function (request, response) {
             }
         }
     } catch (error) {
-        let value = { error: true, status: error?.status, response: error?.statusText };
+        const status = error?.status ?? error?.code ?? 'UNKNOWN';
+        const text = error?.error ?? error?.statusText ?? error?.message ?? 'Unknown error on /generate endpoint';
+        let value = { error: true, status: status, response: text };
         console.log('Endpoint error:', error);
 
         if (!response.headersSent) {

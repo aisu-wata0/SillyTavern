@@ -182,6 +182,10 @@ body.movingUI ::-webkit-scrollbar-thumb:vertical {
     min-width: 40px;
 }
 
+::-webkit-scrollbar-corner {
+    background-color: transparent;
+}
+
 table.responsiveTable {
     width: 100%;
     margin: 10px 0;
@@ -723,6 +727,10 @@ body .panelControlBar {
     order: 1;
 }
 
+#mes_impersonate {
+    order: 1;
+}
+
 #send_form .mes_stop {
     display: none;
     order: 2;
@@ -985,6 +993,7 @@ body .panelControlBar {
     padding: 0;
     font-family: var(--mainFontFamily);
     font-weight: 400;
+    align-self: center;
 }
 
 .swipe_left {
@@ -1172,6 +1181,7 @@ textarea {
 textarea.autoSetHeight {
     max-height: 50vh;
     max-height: 50dvh;
+    field-sizing: content;
 }
 
 input,
@@ -1598,6 +1608,7 @@ body[data-stscript-style] .hljs.language-stscript {
     .hljs-pipe {
         color: var(--ac-style-color-punctuation);
     }
+
     .hljs-pipebreak {
         color: var(--ac-style-color-type);
     }
@@ -1691,6 +1702,7 @@ body[data-stscript-style] .hljs.language-stscript {
             background-color: var(--ac-color-selectedBackground);
             color: var(--ac-color-selectedText);
         }
+
         &.selected.not-selectable>* {
             background-color: var(--ac-color-notSelectableBackground);
             color: var(--ac-color-notSelectableText);
@@ -1772,11 +1784,13 @@ body[data-stscript-style] .hljs.language-stscript {
         padding: 0.25em 0.25em 0.5em 0.25em;
         border-bottom: 1px solid var(--ac-color-border);
 
-        > .head {
+        >.head {
             display: flex;
             gap: 0.5em;
         }
-        > .head > .name, > .name {
+
+        >.head>.name,
+        >.name {
             flex: 1 1 auto;
             font-weight: bold;
             color: var(--ac-color-text);
@@ -1786,20 +1800,25 @@ body[data-stscript-style] .hljs.language-stscript {
                 text-decoration: 1px dotted underline;
             }
         }
-        > .head > .source {
+
+        >.head>.source {
             padding: 0 0.5em;
             cursor: help;
             display: flex;
             align-items: center;
             gap: 0.5em;
+
             &.isThirdParty.isExtension {
                 color: #F89406;
             }
+
             &.isCore {
                 color: transparent;
+
                 &.isExtension {
                     color: #51A351;
                 }
+
                 &:after {
                     content: '';
                     order: -1;
@@ -2418,7 +2437,6 @@ input[type="file"] {
 }
 
 #rm_print_characters_block .text_block {
-    height: 100%;
     width: 100%;
     opacity: 0.5;
     margin: 0 auto 1px auto;
@@ -2612,7 +2630,8 @@ select option:not(:checked) {
     color: var(--golden) !important;
 }
 
-.world_set {
+.world_set,
+.toggleEnabled {
     color: var(--active) !important;
 }
 
@@ -3509,8 +3528,18 @@ grammarly-extension {
     column-gap: 20px;
 }
 
+.horde-model-description {
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    font-size: 0.9em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .drag-handle {
     cursor: grab;
+    /* Make the drag handle not selectable in most browsers */
+    user-select: none;
 }
 
 #form_rename_chat {
@@ -3953,6 +3982,10 @@ input[type="range"]::-webkit-slider-thumb {
     display: inline-block;
 }
 
+.mes:not([bookmark_link='']) .mes_create_bookmark {
+    display: none;
+}
+
 .mes_edit_buttons {
     display: none;
     flex-direction: row;
@@ -4383,7 +4416,6 @@ body.big-avatars .missing-avatar {
     text-align: center;
 }
 
-
 .userSettingsInnerExpandable {
     border: 1px solid;
     border-color: var(--SmartThemeBorderColor);
@@ -4570,10 +4602,10 @@ a {
     border-radius: 10px;
     max-width: 100%;
     max-height: 40vh;
-    max-height: 40dvh;
     image-rendering: -webkit-optimize-contrast;
 }
 
+.mes_img_swipes,
 .mes_img_controls {
     position: absolute;
     top: 0.1em;
@@ -4583,9 +4615,16 @@ a {
     opacity: 0;
     flex-direction: row;
     justify-content: space-between;
+    align-items: center;
     padding: 1em;
 }
 
+.mes_img_swipes {
+    top: unset;
+    bottom: 0.1rem;
+}
+
+.mes_img_swipes .right_menu_button,
 .mes_img_controls .right_menu_button {
     filter: brightness(90%);
     text-shadow: 1px 1px var(--SmartThemeShadowColor) !important;
@@ -4594,16 +4633,20 @@ a {
     width: 1.25em;
 }
 
+.mes_img_swipes .right_menu_button::before,
 .mes_img_controls .right_menu_button::before {
     /* Fix weird alignment with this font-awesome icons on focus */
     position: relative;
     top: 0.6125em;
 }
 
+.mes_img_swipes .right_menu_button:hover,
 .mes_img_controls .right_menu_button:hover {
     filter: brightness(150%);
 }
 
+.mes_img_container:hover .mes_img_swipes,
+.mes_img_container:focus-within .mes_img_swipes,
 .mes_img_container:hover .mes_img_controls,
 .mes_img_container:focus-within .mes_img_controls {
     opacity: 1;
@@ -4615,6 +4658,17 @@ a {
 
 body:not(.caption) .mes_img_caption {
     display: none;
+}
+
+.mes_img_container:not(.img_swipes) .mes_img_swipes,
+body:not(.sd) .mes_img_swipes {
+    display: none;
+}
+
+.mes_img_swipe_counter {
+    font-weight: 600;
+    filter: drop-shadow(2px 4px 6px black);
+    cursor: default;
 }
 
 .img_enlarged_holder {
@@ -4647,10 +4701,6 @@ body:not(.caption) .mes_img_caption {
     padding: 10px;
     height: 100%;
     width: 100%;
-}
-
-.img_enlarged_holder::-webkit-scrollbar-corner {
-    background-color: transparent;
 }
 
 .img_enlarged_container pre code {
@@ -4732,6 +4782,8 @@ body:not(.caption) .mes_img_caption {
 
 #customCSS {
     flex: 1 1 auto;
+    min-height: 20vh;
+    min-height: 20dvh;
 }
 
 #ui_language_select {
@@ -5300,6 +5352,7 @@ body:not(.movingUI) .drawer-content.maximized {
     flex-direction: column;
     gap: 10px;
     text-align: left;
+    height: 100%;
 }
 
 .onboarding span.menu_button {
@@ -5385,6 +5438,7 @@ body:not(.movingUI) .drawer-content.maximized {
 .popup:has(.faPicker) {
     /* Fix height for fa picker popup, otherwise search is making it resize weirdly */
     height: 70%;
+
     .popup-content {
         display: flex;
         flex-direction: column;
@@ -5394,7 +5448,8 @@ body:not(.movingUI) .drawer-content.maximized {
 .faPicker-container {
     display: flex;
     flex-direction: column;
-    overflow: hidden;;
+    overflow: hidden;
+    ;
 }
 
 .faQuery-container {
@@ -5404,26 +5459,32 @@ body:not(.movingUI) .drawer-content.maximized {
 .faPicker {
     flex: 1 1 auto;
     overflow: auto;
-	gap: 1em;
+    gap: 1em;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(3.5em, 1fr));
 
-	.menu_button {
-		aspect-ratio: 1 / 1;
-		font-size: 2em;
-		height: 1lh;
-		line-height: 1.2;
-		padding: 0.25em;
-		width: unset;
-		box-sizing: content-box;
+    .menu_button {
+        aspect-ratio: 1 / 1;
+        font-size: 2em;
+        height: 1lh;
+        line-height: 1.2;
+        padding: 0.25em;
+        width: unset;
+        box-sizing: content-box;
+
         &.hidden {
             display: none;
         }
-	}
+    }
 }
 
 .faPicker:not(:has(:not(.hidden)))::after {
     content: 'No icons found';
     color: var(--SmartThemeBodyColor);
     opacity: 0.7;
+    width: max-content;
+}
+
+#AdvancedFormatting .autoSetHeight {
+    overflow-wrap: anywhere;
 }

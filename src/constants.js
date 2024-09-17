@@ -5,7 +5,6 @@ const PUBLIC_DIRECTORIES = {
     extensions: 'public/scripts/extensions',
 };
 
-const DEFAULT_AVATAR = '/img/ai4.png';
 const SETTINGS_FILE = 'settings.json';
 
 /**
@@ -152,6 +151,10 @@ const GEMINI_SAFETY = [
         category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
         threshold: 'BLOCK_NONE',
     },
+    {
+        category: 'HARM_CATEGORY_CIVIC_INTEGRITY',
+        threshold: 'BLOCK_NONE',
+    },
 ];
 
 const BISON_SAFETY = [
@@ -195,6 +198,7 @@ const CHAT_COMPLETION_SOURCES = {
     PERPLEXITY: 'perplexity',
     GROQ: 'groq',
     ZEROONEAI: '01ai',
+    BLOCKENTROPY: 'blockentropy',
 };
 
 /**
@@ -348,6 +352,11 @@ const OPENROUTER_HEADERS = {
     'X-Title': 'SillyTavern',
 };
 
+const FEATHERLESS_HEADERS = {
+    'HTTP-Referer': 'https://sillytavern.app',
+    'X-Title': 'SillyTavern',
+};
+
 const OPENROUTER_KEYS = [
     'max_tokens',
     'temperature',
@@ -412,7 +421,6 @@ const VLLM_KEYS = [
 
 module.exports = {
     DEFAULT_USER,
-    DEFAULT_AVATAR,
     SETTINGS_FILE,
     PUBLIC_DIRECTORIES,
     USER_DIRECTORY_TEMPLATE,
@@ -432,4 +440,5 @@ module.exports = {
     OPENROUTER_KEYS,
     VLLM_KEYS,
     FEATHERLESS_KEYS,
+    FEATHERLESS_HEADERS,
 };

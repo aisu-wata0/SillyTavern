@@ -1,12 +1,27 @@
 const fetch = require('node-fetch').default;
 const https = require('https');
 const express = require('express');
+const iconv = require('iconv-lite');
 const { readSecret, SECRET_KEYS } = require('./secrets');
 const { getConfigValue, uuidv4 } = require('../util');
 const { jsonParser } = require('../express-common');
 
 const DEEPLX_URL_DEFAULT = 'http://127.0.0.1:1188/translate';
 const ONERING_URL_DEFAULT = 'http://127.0.0.1:4990/translate';
+
+/**
+ * Tries to decode a Node.js Buffer to a string using iconv-lite for UTF-8.
+ * @param {Buffer} buffer Node.js Buffer
+ * @returns {string} Decoded string
+ */
+function decodeBuffer(buffer) {
+    try {
+        return iconv.decode(buffer, 'utf-8');
+    } catch (error) {
+        console.log('Failed to decode buffer:', error);
+        return buffer.toString('utf-8');
+    }
+}
 
 const router = express.Router();
 
@@ -80,16 +95,18 @@ router.post('/google', jsonParser, async (request, response) => {
         const url = generateRequestUrl(text, { to: lang });
 
         https.get(url, (resp) => {
-            let data = '';
+            const data = [];
 
             resp.on('data', (chunk) => {
-                data += chunk;
+                data.push(chunk);
             });
 
             resp.on('end', () => {
                 try {
-                    const result = normaliseResponse(JSON.parse(data));
+                    const decodedData = decodeBuffer(Buffer.concat(data));
+                    const result = normaliseResponse(JSON.parse(decodedData));
                     console.log('Translated text: ' + result.text);
+                    response.setHeader('Content-Type', 'text/plain; charset=utf-8');
                     return response.send(result.text);
                 } catch (error) {
                     console.log('Translation error', error);
@@ -107,27 +124,27 @@ router.post('/google', jsonParser, async (request, response) => {
 });
 
 router.post('/yandex', jsonParser, async (request, response) => {
-    const chunks = request.body.chunks;
-    const lang = request.body.lang;
-
-    if (!chunks || !lang) {
-        return response.sendStatus(400);
-    }
-
-    // reconstruct original text to log
-    let inputText = '';
-
-    const params = new URLSearchParams();
-    for (const chunk of chunks) {
-        params.append('text', chunk);
-        inputText += chunk;
-    }
-    params.append('lang', lang);
-    const ucid = uuidv4().replaceAll('-', '');
-
-    console.log('Input text: ' + inputText);
-
     try {
+        const chunks = request.body.chunks;
+        const lang = request.body.lang;
+
+        if (!chunks || !lang) {
+            return response.sendStatus(400);
+        }
+
+        // reconstruct original text to log
+        let inputText = '';
+
+        const params = new URLSearchParams();
+        for (const chunk of chunks) {
+            params.append('text', chunk);
+            inputText += chunk;
+        }
+        params.append('lang', lang);
+        const ucid = uuidv4().replaceAll('-', '');
+
+        console.log('Input text: ' + inputText);
+
         const result = await fetch(`https://translate.yandex.net/api/v1/tr.json/translate?ucid=${ucid}&srv=android&format=text`, {
             method: 'POST',
             body: params,
