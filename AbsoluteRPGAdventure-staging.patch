@@ -2,10 +2,10 @@ diff --git a/AbsoluteRPGAdventure-staging.patch b/AbsoluteRPGAdventure-staging.p
 new file mode 100644
 index 00000000..e69de29b
 diff --git a/public/index.html b/public/index.html
-index 6ac77040..2e2f2692 100644
+index 4e5b26c0..517986d3 100644
 --- a/public/index.html
 +++ b/public/index.html
-@@ -4492,6 +4492,141 @@
+@@ -4557,6 +4557,141 @@
                  </div>
              </div>
          </div>
@@ -148,7 +148,7 @@ index 6ac77040..2e2f2692 100644
              <div id="unimportantYes" class="drawer-toggle drawer-header">
                  <div id="rightNavDrawerIcon" class="drawer-icon fa-solid fa-address-card  closedIcon" title="Character Management" data-i18n="[title]Character Management">
 diff --git a/public/script.js b/public/script.js
-index 5a08e7cf..091946ae 100644
+index c321c051..51b0c390 100644
 --- a/public/script.js
 +++ b/public/script.js
 @@ -94,6 +94,8 @@ import {
@@ -160,7 +160,7 @@ index 5a08e7cf..091946ae 100644
      openai_messages_count,
      chat_completion_sources,
      getChatCompletionModel,
-@@ -3120,7 +3122,7 @@ export async function generateRaw(prompt, api, instructOverride, quietToLoud, sy
+@@ -3166,7 +3168,7 @@ export async function generateRaw(prompt, api, instructOverride, quietToLoud, sy
          if (api == 'koboldhorde') {
              data = await generateHorde(prompt, generateData, abortController.signal, false);
          } else if (api == 'openai') {
@@ -169,16 +169,16 @@ index 5a08e7cf..091946ae 100644
          } else {
              const generateUrl = getGenerateUrl(api);
              const response = await fetch(generateUrl, {
-@@ -5017,7 +5019,7 @@ function setInContextMessages(lastmsg, type) {
+@@ -5091,7 +5093,7 @@ function setInContextMessages(lastmsg, type) {
   */
- async function sendGenerationRequest(type, data) {
+ export async function sendGenerationRequest(type, data) {
      if (main_api === 'openai') {
 -        return await sendOpenAIRequest(type, data.prompt, abortController.signal);
 +        return await sendOpenAIRequest(type, data.prompt, abortController.signal, characters[this_chid].chat);
      }
  
      if (main_api === 'koboldhorde') {
-@@ -5054,7 +5056,7 @@ async function sendStreamingRequest(type, data) {
+@@ -5128,7 +5130,7 @@ export async function sendStreamingRequest(type, data) {
  
      switch (main_api) {
          case 'openai':
@@ -187,7 +187,7 @@ index 5a08e7cf..091946ae 100644
          case 'textgenerationwebui':
              return await generateTextGenWithStreaming(data, streamingProcessor.abortController.signal);
          case 'novel':
-@@ -6349,6 +6351,9 @@ export async function getSettings() {
+@@ -6424,6 +6426,9 @@ export async function getSettings() {
          // Load power user settings
          loadPowerUserSettings(settings, data);
  
@@ -197,7 +197,7 @@ index 5a08e7cf..091946ae 100644
          // Load character tags
          loadTagsSettings(settings);
  
-@@ -6454,6 +6459,7 @@ export async function saveSettings(type) {
+@@ -6529,6 +6534,7 @@ export async function saveSettings(type) {
              swipes: swipes,
              horde_settings: horde_settings,
              power_user: power_user,
@@ -206,7 +206,7 @@ index 5a08e7cf..091946ae 100644
              tags: tags,
              tag_map: tag_map,
 diff --git a/public/scripts/RossAscends-mods.js b/public/scripts/RossAscends-mods.js
-index 7723c851..a4541ad6 100644
+index 2cfeb1f6..66a6dfd1 100644
 --- a/public/scripts/RossAscends-mods.js
 +++ b/public/scripts/RossAscends-mods.js
 @@ -48,6 +48,10 @@ var RightNavPanel = document.getElementById('right-nav-panel');
@@ -220,7 +220,7 @@ index 7723c851..a4541ad6 100644
  var SelectedCharacterTab = document.getElementById('rm_button_selected_ch');
  
  var connection_made = false;
-@@ -415,6 +419,12 @@ function OpenNavPanels() {
+@@ -412,6 +416,12 @@ function OpenNavPanels() {
              console.debug('RA -- clicking WI to open');
              $('#WIDrawerIcon').click();
          }
@@ -233,7 +233,7 @@ index 7723c851..a4541ad6 100644
      }
  }
  
-@@ -794,6 +804,31 @@ export function initRossMods() {
+@@ -791,6 +801,31 @@ export function initRossMods() {
          }
      });
  
@@ -265,7 +265,7 @@ index 7723c851..a4541ad6 100644
      // read the state of right Nav Lock and apply to rightnav classlist
      $(RPanelPin).prop('checked', LoadLocalBool('NavLockOn'));
      if (LoadLocalBool('NavLockOn') == true) {
-@@ -827,6 +862,17 @@ export function initRossMods() {
+@@ -824,6 +859,17 @@ export function initRossMods() {
          $(WorldInfo).addClass('pinnedOpen');
      }
  
@@ -283,7 +283,7 @@ index 7723c851..a4541ad6 100644
      //save state of Right nav being open or closed
      $('#rightNavDrawerIcon').on('click', function () {
          if (!$('#rightNavDrawerIcon').hasClass('openIcon')) {
-@@ -848,6 +894,13 @@ export function initRossMods() {
+@@ -845,6 +891,13 @@ export function initRossMods() {
          } else { SaveLocal('WINavOpened', 'false'); }
      });
  
@@ -297,7 +297,7 @@ index 7723c851..a4541ad6 100644
      var chatbarInFocus = false;
      $('#send_textarea').focus(function () {
          chatbarInFocus = true;
-@@ -1197,6 +1250,12 @@ export function initRossMods() {
+@@ -1194,6 +1247,12 @@ export function initRossMods() {
                  return;
              }
  
@@ -311,7 +311,7 @@ index 7723c851..a4541ad6 100644
                  $(RPanelPin).prop('checked') === false) {
                  $('#rightNavDrawerIcon').trigger('click');
 diff --git a/public/scripts/openai.js b/public/scripts/openai.js
-index e2402c09..537a104b 100644
+index cc7833f2..6c9bd472 100644
 --- a/public/scripts/openai.js
 +++ b/public/scripts/openai.js
 @@ -88,6 +88,8 @@ export {
@@ -323,19 +323,22 @@ index e2402c09..537a104b 100644
  };
  
  let openai_messages_count = 0;
-@@ -1370,6 +1372,1704 @@ function checkQuotaError(data) {
+@@ -1411,6 +1413,1759 @@ function checkQuotaError(data) {
      }
  }
  
-+async function fetchWithTimeout(url, ms, post) {
-+    if (!ms) {
-+        ms = 60000;
-+    }
++async function fetchWithTimeout(
++    /** @type {string | URL | globalThis.Request} */
++    url,
++    /** @type {RequestInit} */
++    init,
++    ms = 60000,
++) {
 +    const timeout = new Promise((resolve, reject) => {
 +        setTimeout(reject, ms, 'Timeout');
 +    });
 +
-+    const response = fetch(url, post);
++    const response = fetch(url, init);
 +
 +    return Promise.race([
 +        response,
@@ -882,6 +885,7 @@ index e2402c09..537a104b 100644
 +        console.info(ARA_msg_suffix, "ARA_local.loaded");
 +    } else {
 +        ARA_configReset();
++        ARA_settingsSetText(ARA_config_default_txt);
 +    }
 +}
 +
@@ -1041,6 +1045,14 @@ index e2402c09..537a104b 100644
 +    // Remove trailing slash
 +    url = url.replace(/\/$/, '');
 +    return url;
++}
++
++function element_add_download_on_click(element, data, filename, type) {
++    var file = new Blob([data], {type: type});
++    let url = URL.createObjectURL(file);
++    element.href = url;
++    element.download = filename;
++    console.log(ARA_msg_suffix, "Added download to element:", element, "filename", filename, "type", type, "url", url, "file", file, "data", data);
 +}
 +
 +const ARAonLoad = () => {
@@ -1629,6 +1641,30 @@ index e2402c09..537a104b 100644
 +    return ARA;
 +}
 +
++function get_document_css() {
++    return [...document.styleSheets]
++        .map(styleSheet => {
++            try {
++                return [...styleSheet.cssRules]
++                    .map(rule => rule.cssText)
++                    .join('');
++            } catch (e) {
++                console.log('Access to stylesheet %s is denied. Ignoring...', styleSheet.href);
++            }
++        })
++        .filter(Boolean)
++        .join('\n');
++}
++
++function sheetHtmlBuilds(ARA_sheet_el) {
++    const outerHTML = ARA_sheet_el.outerHTML;
++    const css = get_document_css();
++    return `<style>\n${css}\n</style>\n<style>\n
++    body {
++        overflow: auto;
++    }
++    \n</style>\n${outerHTML}`;
++}
 +
 +function ARA_showSheet(data) {
 +    if (data.game?.sheet?.render?.text) {
@@ -1637,11 +1673,21 @@ index e2402c09..537a104b 100644
 +        try {
 +            ARA_sheet_el.innerHTML = formatTextToHtml(sheet_text).outerHTML;
 +            HTMLElementCodeHighlight(ARA_sheet_el);
++
++            ARA_local.latest_chat_id_sheet = data.game.chat_id;
++            
++            const ARA_sheet_download_el = document.querySelector('#ARA-sheet-download');
++            if (ARA_sheet_download_el != null) {
++                element_add_download_on_click(
++                    ARA_sheet_download_el,
++                    sheetHtmlBuilds(ARA_sheet_el),
++                    `Absolute RPG - Status Sheet ${data.game.chat_id || ""} ${Date.now()}.html`,
++                    'text/html',
++                )
++            }
 +        } catch (err) {
 +            console.error(err);
-+            const nl_regex = /\n|\r\n|\n\r|\r/gm;
-+            let sheetHtml = sheet_text.replace(nl_regex, '<br>');
-+            ARA_sheet_el.innerHTML = sheetHtml;
++            ARA_sheet_el.innerHTML = sheet_text;
 +        }
 +    }
 +}
@@ -1879,11 +1925,12 @@ index e2402c09..537a104b 100644
 +        method: 'POST',
 +        body: JSON.stringify(body),
 +        headers: getRequestHeaders(),
++        signal,
 +    };
-+    const res = await fetchWithTimeout(ARA_local.config.url + '/prompt', ARA_local.config.request_timeout_ms, post);
++    const res = await fetchWithTimeout(ARA_local.config.url + '/prompt', post, ARA_local.config.request_timeout_ms, );
 +    let data = await res.json();
 +    if (data.game && data.game.error) {
-+        console.trace('Error:', ARA_msg_suffix, data.game.error);
++        console.trace(ARA_msg_suffix, 'Error:', data.game.error);
 +        return data;
 +    }
 +    if (data.game) {
@@ -1987,6 +2034,9 @@ index e2402c09..537a104b 100644
 +        ARA_show(data_s, mock);
 +    }
 +}
++function errIsUserAbort(err) {
++    return (err.name === 'AbortError') && (err.message === 'signal is aborted without reason' || err.message === 'User aborted request.');
++}
 +
 +async function ARA_getResult(lastReply, chat_id, generate_data_prev, signal = null) {
 +    console.info(ARA_msg_suffix, 'getResult()');
@@ -2014,12 +2064,17 @@ index e2402c09..537a104b 100644
 +        headers: getRequestHeaders(),
 +    };
 +    try {
-+        const res = await fetchWithTimeout(ARA_local.config.url + '/getResult', ARA_local.config.request_result_timeout_ms, post);
++        const res = await fetchWithTimeout(ARA_local.config.url + '/getResult', post, ARA_local.config.request_result_timeout_ms);
 +        const data = await res.json();
 +        ARA_show(data);
 +        ARA_summary_preemptive(data.game);
 +        return data;
 +    } catch (err) {
++        if (errIsUserAbort(err)) {
++            return {};
++        }
++        let errorMsg = ARA_msg_suffix + 'Failed getting game results from game server: ';
++        toastr.error(errorMsg + String(err));
 +        console.error(err.toString());
 +    }
 +    return {};
@@ -2028,7 +2083,7 @@ index e2402c09..537a104b 100644
  function checkModerationError(data) {
      const moderationError = data?.error?.message?.includes('requires moderation');
      if (moderationError) {
-@@ -1718,7 +3418,7 @@ async function sendAltScaleRequest(messages, logit_bias, signal, type) {
+@@ -1759,7 +3514,7 @@ async function sendAltScaleRequest(messages, logit_bias, signal, type) {
      return data.output;
  }
  
@@ -2037,7 +2092,7 @@ index e2402c09..537a104b 100644
      // Provide default abort signal
      if (!signal) {
          signal = new AbortController().signal;
-@@ -1787,7 +3487,7 @@ async function sendOpenAIRequest(type, messages, signal) {
+@@ -1828,7 +3583,7 @@ async function sendOpenAIRequest(type, messages, signal) {
      }
  
      const model = getChatCompletionModel();
@@ -2046,7 +2101,7 @@ index e2402c09..537a104b 100644
          'messages': messages,
          'model': model,
          'temperature': Number(oai_settings.temp_openai),
-@@ -1926,6 +3626,26 @@ async function sendOpenAIRequest(type, messages, signal) {
+@@ -1968,6 +3723,29 @@ async function sendOpenAIRequest(type, messages, signal) {
          generate_data['seed'] = oai_settings.seed;
      }
  
@@ -2058,22 +2113,25 @@ index e2402c09..537a104b 100644
 +                generate_data = data.generate_data;
 +            }
 +        } catch (error) {
-+            console.error(error);
-+            let errorMsg = ARA_msg_suffix + 'Failed on promptAbsoluteRPGAdventure: ';
++            if (errIsUserAbort(error)) {
++                throw error;
++            }
++            let errorMsg = ARA_msg_suffix + 'Failed getting prompt from game server: ';
++            toastr.error(errorMsg + String(error));
 +            if (error.stack) {
 +                errorMsg += error.stack.toString();
 +            } else {
 +                errorMsg += String(error);
 +            }
 +            console.error(errorMsg);
-+            throw new Error(errorMsg);
++            throw new Error(errorMsg, { cause: error });
 +        }
 +    }
 +
      await eventSource.emit(event_types.CHAT_COMPLETION_SETTINGS_READY, generate_data);
  
      if (isFunctionCallingSupported() && !stream) {
-@@ -1953,9 +3673,9 @@ async function sendOpenAIRequest(type, messages, signal) {
+@@ -1995,9 +3773,9 @@ async function sendOpenAIRequest(type, messages, signal) {
              const swipes = [];
              while (true) {
                  const { done, value } = await reader.read();
@@ -2085,12 +2143,12 @@ index e2402c09..537a104b 100644
                  tryParseStreamingError(response, rawData);
                  const parsed = JSON.parse(rawData);
  
-@@ -1968,6 +3688,13 @@ async function sendOpenAIRequest(type, messages, signal) {
+@@ -2010,6 +3788,13 @@ async function sendOpenAIRequest(type, messages, signal) {
  
                  yield { text, swipes: swipes, logprobs: parseChatCompletionLogprobs(parsed) };
              }
 +            if (power_user.absoluteRPGAdventure) {
-+                const data = await ARA_getResult(text, chat_id, generate_data_prev, signal);
++                const data = await ARA_getResult(text, chat_id, generate_data_prev, null);
 +                if (data?.game?.lastReply) {
 +                    yield { text: data.game.lastReply, swipes: swipes };
 +                }
@@ -2099,7 +2157,7 @@ index e2402c09..537a104b 100644
          };
      }
      else {
-@@ -2327,7 +4054,14 @@ class TokenHandler {
+@@ -2369,7 +4154,14 @@ class TokenHandler {
  }
  
  
@@ -2116,7 +2174,7 @@ index e2402c09..537a104b 100644
  // Thrown by ChatCompletion when a requested prompt couldn't be found.
  class IdentifierNotFoundError extends Error {
 diff --git a/public/scripts/power-user.js b/public/scripts/power-user.js
-index 08fbfb50..cca51eae 100644
+index 34e22d0f..2bd42ae5 100644
 --- a/public/scripts/power-user.js
 +++ b/public/scripts/power-user.js
 @@ -181,6 +181,7 @@ let power_user = {
@@ -2137,7 +2195,7 @@ index 08fbfb50..cca51eae 100644
      hideChatAvatars_enabled: false,
      max_context_unlocked: false,
      message_token_count_enabled: false,
-@@ -1723,6 +1727,9 @@ function loadPowerUserSettings(settings, data) {
+@@ -1730,6 +1734,9 @@ function loadPowerUserSettings(settings, data) {
      switchReducedMotion();
      switchCompactInputArea();
      reloadMarkdownProcessor(power_user.render_formulas);
@@ -2147,7 +2205,7 @@ index 08fbfb50..cca51eae 100644
      loadInstructMode(data);
      loadContextSettings();
      loadMaxContextUnlocked();
-@@ -3699,6 +3706,11 @@ $(document).ready(() => {
+@@ -3714,6 +3721,11 @@ $(document).ready(() => {
          switchHotswap();
      });
  
@@ -2160,10 +2218,10 @@ index 08fbfb50..cca51eae 100644
          const value = !!$(this).prop('checked');
          power_user.prefer_character_prompt = value;
 diff --git a/public/style.css b/public/style.css
-index 95a61cda..f4c694f7 100644
+index d8ba7ae5..932305a3 100644
 --- a/public/style.css
 +++ b/public/style.css
-@@ -2237,6 +2237,7 @@ input[type="file"] {
+@@ -2303,6 +2303,7 @@ input[type="file"] {
      filter: brightness(150%);
  }
  
@@ -2171,7 +2229,7 @@ index 95a61cda..f4c694f7 100644
  #rm_button_characters,
  #rm_button_panel_pin_div,
  #lm_button_panel_pin_div,
-@@ -2246,6 +2247,7 @@ input[type="file"] {
+@@ -2312,6 +2313,7 @@ input[type="file"] {
      padding: 1px;
  }
  
@@ -2179,7 +2237,7 @@ index 95a61cda..f4c694f7 100644
  #rm_button_panel_pin_div,
  #lm_button_panel_pin_div,
  #WI_button_panel_pin_div {
-@@ -2253,49 +2255,57 @@ input[type="file"] {
+@@ -2319,49 +2321,57 @@ input[type="file"] {
      transition: 0.3s;
  }
  
@@ -2238,15 +2296,15 @@ index 95a61cda..f4c694f7 100644
  #rm_button_panel_pin:not(:checked)+label .unchecked,
  #lm_button_panel_pin:not(:checked)+label .unchecked,
  #WI_panel_pin:not(:checked)+label .unchecked {
-@@ -4425,6 +4435,7 @@ a {
+@@ -4500,6 +4510,7 @@ a {
  /*           Right nav panel and nav-toggle */
  /* ############################################################# */
  
 +#ara-panel,
  #right-nav-panel {
      width: calc((100vw - var(--sheldWidth) - 2px) /2);
-     width: calc((100svw - var(--sheldWidth) - 2px) /2);
-@@ -5130,6 +5141,11 @@ body:not(.movingUI) .drawer-content.maximized {
+     width: calc((100dvw - var(--sheldWidth) - 2px) /2);
+@@ -5205,6 +5216,11 @@ body:not(.movingUI) .drawer-content.maximized {
      border-top: 3px dotted var(--SmartThemeQuoteColor) !important;
  }
  
