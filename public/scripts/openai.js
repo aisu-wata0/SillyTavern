@@ -2745,7 +2745,11 @@ function get_document_css() {
 function sheetHtmlBuilds(ARA_sheet_el) {
     const outerHTML = ARA_sheet_el.outerHTML;
     const css = get_document_css();
-    return `<style>\n${css}\n</style>\n\n${outerHTML}`;
+    return `<style>\n${css}\n</style>\n<style>\n
+    body {
+        overflow: auto;
+    }
+    \n</style>\n${outerHTML}`;
 }
 
 function ARA_showSheet(data) {
@@ -3116,6 +3120,9 @@ async function ARA_summary_preemptive(game) {
         ARA_show(data_s, mock);
     }
 }
+function errIsUserAbort(err) {
+    return (err.name === 'AbortError') && (err.message === 'signal is aborted without reason' || err.message === 'User aborted request.');
+}
 
 async function ARA_getResult(lastReply, chat_id, generate_data_prev, signal = null) {
     console.info(ARA_msg_suffix, 'getResult()');
@@ -3149,6 +3156,9 @@ async function ARA_getResult(lastReply, chat_id, generate_data_prev, signal = nu
         ARA_summary_preemptive(data.game);
         return data;
     } catch (err) {
+        if (errIsUserAbort(err)) {
+            return {};
+        }
         let errorMsg = ARA_msg_suffix + 'Failed getting game results from game server: ';
         toastr.error(errorMsg + String(err));
         console.error(err.toString());
@@ -3721,6 +3731,9 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
                 generate_data = data.generate_data;
             }
         } catch (error) {
+            if (errIsUserAbort(error)) {
+                throw error;
+            }
             let errorMsg = ARA_msg_suffix + 'Failed getting prompt from game server: ';
             toastr.error(errorMsg + String(error));
             if (error.stack) {
