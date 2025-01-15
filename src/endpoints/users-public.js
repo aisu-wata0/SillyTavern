@@ -1,15 +1,16 @@
-const crypto = require('crypto');
-const storage = require('node-persist');
-const express = require('express');
-const { RateLimiterMemory, RateLimiterRes } = require('rate-limiter-flexible');
-const { jsonParser, getIpFromRequest } = require('../express-common');
-const { color, Cache, getConfigValue } = require('../util');
-const { KEY_PREFIX, getUserAvatar, toKey, getPasswordHash, getPasswordSalt } = require('../users');
+import crypto from 'node:crypto';
+
+import storage from 'node-persist';
+import express from 'express';
+import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible';
+import { jsonParser, getIpFromRequest } from '../express-common.js';
+import { color, Cache, getConfigValue } from '../util.js';
+import { KEY_PREFIX, getUserAvatar, toKey, getPasswordHash, getPasswordSalt } from '../users.js';
 
 const DISCREET_LOGIN = getConfigValue('enableDiscreetLogin', false);
 const MFA_CACHE = new Cache(5 * 60 * 1000);
 
-const router = express.Router();
+export const router = express.Router();
 const loginLimiter = new RateLimiterMemory({
     points: 5,
     duration: 60,
@@ -25,10 +26,10 @@ router.post('/list', async (_request, response) => {
             return response.sendStatus(204);
         }
 
-        /** @type {import('../users').User[]} */
+        /** @type {import('../users.js').User[]} */
         const users = await storage.values(x => x.key.startsWith(KEY_PREFIX));
 
-        /** @type {Promise<import('../users').UserViewModel>[]} */
+        /** @type {Promise<import('../users.js').UserViewModel>[]} */
         const viewModelPromises = users
             .filter(x => x.enabled)
             .map(user => new Promise(async (resolve) => {
@@ -62,21 +63,21 @@ router.post('/login', jsonParser, async (request, response) => {
         const ip = getIpFromRequest(request);
         await loginLimiter.consume(ip);
 
-        /** @type {import('../users').User} */
+        /** @type {import('../users.js').User} */
         const user = await storage.getItem(toKey(request.body.handle));
 
         if (!user) {
-            console.log('Login failed: User not found');
+            console.log('Login failed: User', request.body.handle, 'not found');
             return response.status(403).json({ error: 'Incorrect credentials' });
         }
 
         if (!user.enabled) {
-            console.log('Login failed: User is disabled');
+            console.log('Login failed: User', user.handle, 'is disabled');
             return response.status(403).json({ error: 'User is disabled' });
         }
 
         if (user.password && user.password !== getPasswordHash(request.body.password, user.salt)) {
-            console.log('Login failed: Incorrect password');
+            console.log('Login failed: Incorrect password for', user.handle);
             return response.status(403).json({ error: 'Incorrect credentials' });
         }
 
@@ -87,7 +88,7 @@ router.post('/login', jsonParser, async (request, response) => {
 
         await loginLimiter.delete(ip);
         request.session.handle = user.handle;
-        console.log('Login successful:', user.handle, request.session);
+        console.log('Login successful:', user.handle, 'from', ip, 'at', new Date().toLocaleString());
         return response.json({ handle: user.handle });
     } catch (error) {
         if (error instanceof RateLimiterRes) {
@@ -110,16 +111,16 @@ router.post('/recover-step1', jsonParser, async (request, response) => {
         const ip = getIpFromRequest(request);
         await recoverLimiter.consume(ip);
 
-        /** @type {import('../users').User} */
+        /** @type {import('../users.js').User} */
         const user = await storage.getItem(toKey(request.body.handle));
 
         if (!user) {
-            console.log('Recover step 1 failed: User not found');
+            console.log('Recover step 1 failed: User', request.body.handle, 'not found');
             return response.status(404).json({ error: 'User not found' });
         }
 
         if (!user.enabled) {
-            console.log('Recover step 1 failed: User is disabled');
+            console.log('Recover step 1 failed: User', user.handle, 'is disabled');
             return response.status(403).json({ error: 'User is disabled' });
         }
 
@@ -147,17 +148,17 @@ router.post('/recover-step2', jsonParser, async (request, response) => {
             return response.status(400).json({ error: 'Missing required fields' });
         }
 
-        /** @type {import('../users').User} */
+        /** @type {import('../users.js').User} */
         const user = await storage.getItem(toKey(request.body.handle));
         const ip = getIpFromRequest(request);
 
         if (!user) {
-            console.log('Recover step 2 failed: User not found');
+            console.log('Recover step 2 failed: User', request.body.handle, 'not found');
             return response.status(404).json({ error: 'User not found' });
         }
 
         if (!user.enabled) {
-            console.log('Recover step 2 failed: User is disabled');
+            console.log('Recover step 2 failed: User', user.handle, 'is disabled');
             return response.status(403).json({ error: 'User is disabled' });
         }
 
@@ -193,7 +194,3 @@ router.post('/recover-step2', jsonParser, async (request, response) => {
         return response.sendStatus(500);
     }
 });
-
-module.exports = {
-    router,
-};

@@ -1,15 +1,19 @@
-const fs = require('fs');
-const path = require('path');
-const express = require('express');
-const { SentencePieceProcessor } = require('@agnai/sentencepiece-js');
-const tiktoken = require('tiktoken');
-const { Tokenizer } = require('@agnai/web-tokenizers');
-const { convertClaudePrompt } = require('../prompt-converters');
-const { TEXTGEN_TYPES } = require('../constants');
-const { jsonParser } = require('../express-common');
-const { setAdditionalHeaders } = require('../additional-headers');
-const { getConfigValue, isValidUrl } = require('../util');
-const writeFileAtomicSync = require('write-file-atomic').sync;
+import fs from 'node:fs';
+import path from 'node:path';
+import { Buffer } from 'node:buffer';
+
+import express from 'express';
+import { sync as writeFileAtomicSync } from 'write-file-atomic';
+
+import { Tokenizer } from '@agnai/web-tokenizers';
+import { SentencePieceProcessor } from '@agnai/sentencepiece-js';
+import tiktoken from 'tiktoken';
+
+import { convertClaudePrompt } from '../prompt-converters.js';
+import { TEXTGEN_TYPES } from '../constants.js';
+import { jsonParser } from '../express-common.js';
+import { setAdditionalHeaders } from '../additional-headers.js';
+import { getConfigValue, isValidUrl } from '../util.js';
 
 /**
  * @typedef { (req: import('express').Request, res: import('express').Response) => Promise<any> } TokenizationHandler
@@ -23,7 +27,7 @@ const tokenizersCache = {};
 /**
  * @type {string[]}
  */
-const TEXT_COMPLETION_MODELS = [
+export const TEXT_COMPLETION_MODELS = [
     'gpt-3.5-turbo-instruct',
     'gpt-3.5-turbo-instruct-0914',
     'text-davinci-003',
@@ -78,7 +82,7 @@ async function getPathToTokenizer(model, fallbackModel) {
             throw new Error('Failed to extract the file name from the URL');
         }
 
-        const CACHE_PATH = path.join(global.DATA_ROOT, '_cache');
+        const CACHE_PATH = path.join(globalThis.DATA_ROOT, '_cache');
         if (!fs.existsSync(CACHE_PATH)) {
             fs.mkdirSync(CACHE_PATH, { recursive: true });
         }
@@ -221,8 +225,10 @@ const claude_tokenizer = new WebTokenizer('src/tokenizers/claude.json');
 const llama3_tokenizer = new WebTokenizer('src/tokenizers/llama3.json');
 const commandTokenizer = new WebTokenizer('https://github.com/SillyTavern/SillyTavern-Tokenizers/raw/main/command-r.json', 'src/tokenizers/llama3.json');
 const qwen2Tokenizer = new WebTokenizer('https://github.com/SillyTavern/SillyTavern-Tokenizers/raw/main/qwen2.json', 'src/tokenizers/llama3.json');
+const nemoTokenizer = new WebTokenizer('https://github.com/SillyTavern/SillyTavern-Tokenizers/raw/main/nemo.json', 'src/tokenizers/llama3.json');
+const deepseekTokenizer = new WebTokenizer('https://github.com/SillyTavern/SillyTavern-Tokenizers/raw/main/deepseek.json', 'src/tokenizers/llama3.json');
 
-const sentencepieceTokenizers = [
+export const sentencepieceTokenizers = [
     'llama',
     'nerdstash',
     'nerdstash_v2',
@@ -237,7 +243,7 @@ const sentencepieceTokenizers = [
  * @param {string} model Sentencepiece model name
  * @returns {SentencePieceTokenizer|null} Sentencepiece tokenizer
  */
-function getSentencepiceTokenizer(model) {
+export function getSentencepiceTokenizer(model) {
     if (model.includes('llama')) {
         return spp_llama;
     }
@@ -349,7 +355,7 @@ function getWebTokenizersChunks(tokenizer, ids) {
  * @param {string} requestModel Models to use for tokenization
  * @returns {string} Tokenizer model to use
  */
-function getTokenizerModel(requestModel) {
+export function getTokenizerModel(requestModel) {
     if (requestModel.includes('o1-preview') || requestModel.includes('o1-mini')) {
         return 'gpt-4o';
     }
@@ -402,6 +408,10 @@ function getTokenizerModel(requestModel) {
         return 'yi';
     }
 
+    if (requestModel.includes('deepseek')) {
+        return 'deepseek';
+    }
+
     if (requestModel.includes('gemma') || requestModel.includes('gemini')) {
         return 'gemma';
     }
@@ -418,11 +428,15 @@ function getTokenizerModel(requestModel) {
         return 'command-r';
     }
 
+    if (requestModel.includes('nemo')) {
+        return 'nemo';
+    }
+
     // default
     return 'gpt-3.5-turbo';
 }
 
-function getTiktokenTokenizer(model) {
+export function getTiktokenTokenizer(model) {
     if (tokenizersCache[model]) {
         return tokenizersCache[model];
     }
@@ -439,7 +453,7 @@ function getTiktokenTokenizer(model) {
  * @param {object[]} messages Array of messages
  * @returns {number} Number of tokens
  */
-function countWebTokenizerTokens(tokenizer, messages) {
+export function countWebTokenizerTokens(tokenizer, messages) {
     // Should be fine if we use the old conversion method instead of the messages API one i think?
     const convertedPrompt = convertClaudePrompt(messages, false, '', false, false, '', false);
 
@@ -631,7 +645,7 @@ function createWebTokenizerDecodingHandler(tokenizer) {
     };
 }
 
-const router = express.Router();
+export const router = express.Router();
 
 router.post('/llama/encode', jsonParser, createSentencepieceEncodingHandler(spp_llama));
 router.post('/nerdstash/encode', jsonParser, createSentencepieceEncodingHandler(spp_nerd));
@@ -645,6 +659,8 @@ router.post('/claude/encode', jsonParser, createWebTokenizerEncodingHandler(clau
 router.post('/llama3/encode', jsonParser, createWebTokenizerEncodingHandler(llama3_tokenizer));
 router.post('/qwen2/encode', jsonParser, createWebTokenizerEncodingHandler(qwen2Tokenizer));
 router.post('/command-r/encode', jsonParser, createWebTokenizerEncodingHandler(commandTokenizer));
+router.post('/nemo/encode', jsonParser, createWebTokenizerEncodingHandler(nemoTokenizer));
+router.post('/deepseek/encode', jsonParser, createWebTokenizerEncodingHandler(deepseekTokenizer));
 router.post('/llama/decode', jsonParser, createSentencepieceDecodingHandler(spp_llama));
 router.post('/nerdstash/decode', jsonParser, createSentencepieceDecodingHandler(spp_nerd));
 router.post('/nerdstash_v2/decode', jsonParser, createSentencepieceDecodingHandler(spp_nerd_v2));
@@ -657,6 +673,8 @@ router.post('/claude/decode', jsonParser, createWebTokenizerDecodingHandler(clau
 router.post('/llama3/decode', jsonParser, createWebTokenizerDecodingHandler(llama3_tokenizer));
 router.post('/qwen2/decode', jsonParser, createWebTokenizerDecodingHandler(qwen2Tokenizer));
 router.post('/command-r/decode', jsonParser, createWebTokenizerDecodingHandler(commandTokenizer));
+router.post('/nemo/decode', jsonParser, createWebTokenizerDecodingHandler(nemoTokenizer));
+router.post('/deepseek/decode', jsonParser, createWebTokenizerDecodingHandler(deepseekTokenizer));
 
 router.post('/openai/encode', jsonParser, async function (req, res) {
     try {
@@ -704,6 +722,16 @@ router.post('/openai/encode', jsonParser, async function (req, res) {
 
         if (queryModel.includes('command-r')) {
             const handler = createWebTokenizerEncodingHandler(commandTokenizer);
+            return handler(req, res);
+        }
+
+        if (queryModel.includes('nemo')) {
+            const handler = createWebTokenizerEncodingHandler(nemoTokenizer);
+            return handler(req, res);
+        }
+
+        if (queryModel.includes('deepseek')) {
+            const handler = createWebTokenizerEncodingHandler(deepseekTokenizer);
             return handler(req, res);
         }
 
@@ -762,6 +790,16 @@ router.post('/openai/decode', jsonParser, async function (req, res) {
 
         if (queryModel.includes('command-r')) {
             const handler = createWebTokenizerDecodingHandler(commandTokenizer);
+            return handler(req, res);
+        }
+
+        if (queryModel.includes('nemo')) {
+            const handler = createWebTokenizerDecodingHandler(nemoTokenizer);
+            return handler(req, res);
+        }
+
+        if (queryModel.includes('deepseek')) {
+            const handler = createWebTokenizerDecodingHandler(deepseekTokenizer);
             return handler(req, res);
         }
 
@@ -831,6 +869,20 @@ router.post('/openai/count', jsonParser, async function (req, res) {
         if (model === 'command-r') {
             const instance = await commandTokenizer.get();
             if (!instance) throw new Error('Failed to load the Command-R tokenizer');
+            num_tokens = countWebTokenizerTokens(instance, req.body);
+            return res.send({ 'token_count': num_tokens });
+        }
+
+        if (model === 'nemo') {
+            const instance = await nemoTokenizer.get();
+            if (!instance) throw new Error('Failed to load the Nemo tokenizer');
+            num_tokens = countWebTokenizerTokens(instance, req.body);
+            return res.send({ 'token_count': num_tokens });
+        }
+
+        if (model === 'deepseek') {
+            const instance = await deepseekTokenizer.get();
+            if (!instance) throw new Error('Failed to load the DeepSeek tokenizer');
             num_tokens = countWebTokenizerTokens(instance, req.body);
             return res.send({ 'token_count': num_tokens });
         }
@@ -914,7 +966,6 @@ router.post('/remote/textgenerationwebui/encode', jsonParser, async function (re
     }
     const text = String(request.body.text) || '';
     const baseUrl = String(request.body.url);
-    const legacyApi = Boolean(request.body.legacy_api);
     const vllmModel = String(request.body.vllm_model) || '';
     const aphroditeModel = String(request.body.aphrodite_model) || '';
 
@@ -929,36 +980,31 @@ router.post('/remote/textgenerationwebui/encode', jsonParser, async function (re
         // Convert to string + remove trailing slash + /v1 suffix
         let url = String(baseUrl).replace(/\/$/, '').replace(/\/v1$/, '');
 
-        if (legacyApi) {
-            url += '/v1/token-count';
-            args.body = JSON.stringify({ 'prompt': text });
-        } else {
-            switch (request.body.api_type) {
-                case TEXTGEN_TYPES.TABBY:
-                    url += '/v1/token/encode';
-                    args.body = JSON.stringify({ 'text': text });
-                    break;
-                case TEXTGEN_TYPES.KOBOLDCPP:
-                    url += '/api/extra/tokencount';
-                    args.body = JSON.stringify({ 'prompt': text });
-                    break;
-                case TEXTGEN_TYPES.LLAMACPP:
-                    url += '/tokenize';
-                    args.body = JSON.stringify({ 'content': text });
-                    break;
-                case TEXTGEN_TYPES.VLLM:
-                    url += '/tokenize';
-                    args.body = JSON.stringify({ 'model': vllmModel, 'prompt': text });
-                    break;
-                case TEXTGEN_TYPES.APHRODITE:
-                    url += '/v1/tokenize';
-                    args.body = JSON.stringify({ 'model': aphroditeModel, 'prompt': text });
-                    break;
-                default:
-                    url += '/v1/internal/encode';
-                    args.body = JSON.stringify({ 'text': text });
-                    break;
-            }
+        switch (request.body.api_type) {
+            case TEXTGEN_TYPES.TABBY:
+                url += '/v1/token/encode';
+                args.body = JSON.stringify({ 'text': text });
+                break;
+            case TEXTGEN_TYPES.KOBOLDCPP:
+                url += '/api/extra/tokencount';
+                args.body = JSON.stringify({ 'prompt': text });
+                break;
+            case TEXTGEN_TYPES.LLAMACPP:
+                url += '/tokenize';
+                args.body = JSON.stringify({ 'content': text });
+                break;
+            case TEXTGEN_TYPES.VLLM:
+                url += '/tokenize';
+                args.body = JSON.stringify({ 'model': vllmModel, 'prompt': text });
+                break;
+            case TEXTGEN_TYPES.APHRODITE:
+                url += '/v1/tokenize';
+                args.body = JSON.stringify({ 'model': aphroditeModel, 'prompt': text });
+                break;
+            default:
+                url += '/v1/internal/encode';
+                args.body = JSON.stringify({ 'text': text });
+                break;
         }
 
         const result = await fetch(url, args);
@@ -969,8 +1015,8 @@ router.post('/remote/textgenerationwebui/encode', jsonParser, async function (re
         }
 
         const data = await result.json();
-        const count = legacyApi ? data?.results[0]?.tokens : (data?.length ?? data?.count ?? data?.value ?? data?.tokens?.length);
-        const ids = legacyApi ? [] : (data?.tokens ?? data?.ids ?? []);
+        const count =  (data?.length ?? data?.count ?? data?.value ?? data?.tokens?.length);
+        const ids = (data?.tokens ?? data?.ids ?? []);
 
         return response.send({ count, ids });
     } catch (error) {
@@ -978,13 +1024,3 @@ router.post('/remote/textgenerationwebui/encode', jsonParser, async function (re
         return response.send({ error: true });
     }
 });
-
-module.exports = {
-    TEXT_COMPLETION_MODELS,
-    getTokenizerModel,
-    getTiktokenTokenizer,
-    countWebTokenizerTokens,
-    getSentencepiceTokenizer,
-    sentencepieceTokenizers,
-    router,
-};

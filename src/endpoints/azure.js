@@ -1,9 +1,10 @@
-const { readSecret, SECRET_KEYS } = require('./secrets');
-const fetch = require('node-fetch').default;
-const express = require('express');
-const { jsonParser } = require('../express-common');
+import fetch from 'node-fetch';
+import { Router } from 'express';
 
-const router = express.Router();
+import { readSecret, SECRET_KEYS } from './secrets.js';
+import { jsonParser } from '../express-common.js';
+
+export const router = Router();
 
 router.post('/list', jsonParser, async (req, res) => {
     try {
@@ -68,7 +69,7 @@ router.post('/generate', jsonParser, async (req, res) => {
             headers: {
                 'Ocp-Apim-Subscription-Key': key,
                 'Content-Type': 'application/ssml+xml',
-                'X-Microsoft-OutputFormat': 'ogg-48khz-16bit-mono-opus',
+                'X-Microsoft-OutputFormat': 'webm-24khz-16bit-mono-opus',
             },
             body: ssml,
         });
@@ -78,7 +79,7 @@ router.post('/generate', jsonParser, async (req, res) => {
             return res.sendStatus(500);
         }
 
-        const audio = await response.buffer();
+        const audio = Buffer.from(await response.arrayBuffer());
         res.set('Content-Type', 'audio/ogg');
         return res.send(audio);
     } catch (error) {
@@ -86,7 +87,3 @@ router.post('/generate', jsonParser, async (req, res) => {
         return res.sendStatus(500);
     }
 });
-
-module.exports = {
-    router,
-};

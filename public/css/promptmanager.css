@@ -28,6 +28,11 @@
     color: var(--white50a);
 }
 
+#completion_prompt_manager #completion_prompt_manager_list .completion_prompt_manager_prompt .completion_prompt_manager_prompt_name .fa-solid[data-role] {
+    vertical-align: unset;
+    margin-left: 3px;
+}
+
 #completion_prompt_manager #completion_prompt_manager_list .completion_prompt_manager_prompt_invisible {
     display: none;
 }
@@ -91,15 +96,34 @@
 #completion_prompt_manager_popup #completion_prompt_manager_popup_inspect {
     display: none;
     padding: 0.5em;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
 }
 
 #completion_prompt_manager_popup .completion_prompt_manager_popup_entry {
-    padding: 1em;
-    margin-top: 2em;
+    padding: 0.5em;
+    flex: 1;
+}
+
+#completion_prompt_manager_popup .completion_prompt_manager_popup_entry_form {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+#completion_prompt_manager_popup .completion_prompt_manager_popup_entry_form_control:has(#completion_prompt_manager_popup_entry_form_prompt) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+#completion_prompt_manager_popup #completion_prompt_manager_popup_entry_form_prompt {
+    flex: 1;
 }
 
 #completion_prompt_manager_popup #completion_prompt_manager_popup_inspect .completion_prompt_manager_popup_entry {
-    padding: 1em;
+    padding: 0.5em;
 }
 
 #completion_prompt_manager_popup #completion_prompt_manager_popup_entry_form_inspect_list {
@@ -241,14 +265,32 @@
 }
 
 #completion_prompt_manager #completion_prompt_manager_list .completion_prompt_manager_prompt .completion_prompt_manager_prompt_name .fa-solid.prompt-manager-overridden {
-    margin-left: 5px;
+    margin-left: 3px;
     color: var(--SmartThemeQuoteColor);
     cursor: pointer;
     opacity: 0.8;
 }
 
+#completion_prompt_manager #completion_prompt_manager_list .completion_prompt_manager_prompt .drag-handle:not(.ui-sortable-handle) {
+    display: none;
+}
+
+#completion_prompt_manager #completion_prompt_manager_list .completion_prompt_manager_prompt:has(.drag-handle.ui-sortable-handle) {
+    position: relative;
+    padding-left: 20px;
+}
+
+#completion_prompt_manager #completion_prompt_manager_list .completion_prompt_manager_prompt .drag-handle {
+    position: absolute;
+    height: 100%;
+    top: 0;
+    padding: 0 5px;
+    display: flex;
+    align-items: center;
+}
+
 #completion_prompt_manager_footer_append_prompt {
-    font-size: 16px;
+    font-size: 1em;
 }
 
 #prompt-manager-export-format-popup {
@@ -303,10 +345,6 @@
     justify-content: space-between;
 }
 
-#prompt-manager-export-format-popup span {
-    font-size: 16px;
-}
-
 @media screen and (max-width: 412px) {
     #completion_prompt_manager_popup {
         max-width: 100%;
@@ -315,4 +353,16 @@
     #completion_prompt_manager #completion_prompt_manager_list li.completion_prompt_manager_prompt span span span {
         margin-left: 0.5em;
     }
+}
+
+.completion_prompt_manager_popup_entry_form_control:has(#completion_prompt_manager_popup_entry_form_prompt:disabled)>div:first-child::after {
+    content: attr(external_piece_text);
+    display: block;
+    width: 100%;
+    font-weight: 600;
+    text-align: center;
+}
+
+.completion_prompt_manager_popup_entry_form_control #completion_prompt_manager_popup_entry_form_prompt:disabled {
+    visibility: hidden;
 }

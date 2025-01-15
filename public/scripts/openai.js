@@ -3,6 +3,7 @@
 * By CncAnon (@CncAnon1)
 * https://github.com/CncAnon1/TavernAITurbo
 */
+import { Fuse, DOMPurify } from '../lib.js';
 
 import {
     abortStatusCheck,
@@ -32,7 +33,7 @@ import {
     system_message_types,
     this_chid,
 } from '../script.js';
-import { selected_group } from './group-chats.js';
+import { getGroupNames, selected_group } from './group-chats.js';
 
 import {
     chatCompletionDefaultPrompts,
@@ -59,14 +60,9 @@ import {
     parseJsonFile,
     resetScrollHeight,
     stringFormat,
+    uuidv4,
 } from './utils.js';
-import { countTokensOpenAI, getTokenizerModel } from './tokenizers.js';
-import {
-    formatInstructModeChat,
-    formatInstructModeExamples,
-    formatInstructModePrompt,
-    formatInstructModeSystemPrompt,
-} from './instruct-mode.js';
+import { countTokensOpenAIAsync, getTokenizerModel } from './tokenizers.js';
 import { isMobile } from './RossAscends-mods.js';
 import { saveLogprobsForActiveMessage } from './logprobs.js';
 import { SlashCommandParser } from './slash-commands/SlashCommandParser.js';
@@ -76,6 +72,7 @@ import { renderTemplateAsync } from './templates.js';
 import { SlashCommandEnumValue } from './slash-commands/SlashCommandEnumValue.js';
 import { Popup, POPUP_RESULT } from './popup.js';
 import { t } from './i18n.js';
+import { ToolManager } from './tool-calling.js';
 
 export {
     openai_messages_count,
@@ -105,19 +102,18 @@ const default_wi_format = '{0}';
 const default_new_chat_prompt = '[Start a new Chat]';
 const default_new_group_chat_prompt = '[Start a new group chat. Group members: {{group}}]';
 const default_new_example_chat_prompt = '[Example Chat]';
-const default_claude_human_sysprompt_message = 'Let\'s get started. Please generate your response based on the information and instructions provided above.';
 const default_continue_nudge_prompt = '[Continue the following message. Do not include ANY parts of the original message. Use capitalization and punctuation as if your reply is a part of the original message: {{lastChatMessage}}]';
 const default_bias = 'Default (none)';
-const default_personality_format = '[{{char}}\'s personality: {{personality}}]';
-const default_scenario_format = '[Circumstances and context of the dialogue: {{scenario}}]';
+const default_personality_format = '{{personality}}';
+const default_scenario_format = '{{scenario}}';
 const default_group_nudge_prompt = '[Write the next reply only as {{char}}.]';
 const default_bias_presets = {
     [default_bias]: [],
     'Anti-bond': [
-        { text: ' bond', value: -50 },
-        { text: ' future', value: -50 },
-        { text: ' bonding', value: -50 },
-        { text: ' connection', value: -25 },
+        { id: '22154f79-dd98-41bc-8e34-87015d6a0eaf', text: ' bond', value: -50 },
+        { id: '8ad2d5c4-d8ef-49e4-bc5e-13e7f4690e0f', text: ' future', value: -50 },
+        { id: '52a4b280-0956-4940-ac52-4111f83e4046', text: ' bonding', value: -50 },
+        { id: 'e63037c7-c9d1-4724-ab2d-7756008b433b', text: ' connection', value: -25 },
     ],
 };
 
@@ -188,6 +184,8 @@ export const chat_completion_sources = {
     GROQ: 'groq',
     ZEROONEAI: '01ai',
     BLOCKENTROPY: 'blockentropy',
+    NANOGPT: 'nanogpt',
+    DEEPSEEK: 'deepseek',
 };
 
 const character_names_behavior = {
@@ -206,7 +204,17 @@ const continue_postfix_types = {
 
 const custom_prompt_post_processing_types = {
     NONE: '',
+    /** @deprecated Use MERGE instead. */
     CLAUDE: 'claude',
+    MERGE: 'merge',
+    SEMI: 'semi',
+    STRICT: 'strict',
+};
+
+const openrouter_middleout_types = {
+    AUTO: 'auto',
+    ON: 'on',
+    OFF: 'off',
 };
 
 const sensitiveFields = [
@@ -229,7 +237,6 @@ const default_settings = {
     top_a_openai: 0,
     repetition_penalty_openai: 1,
     stream_openai: false,
-    websearch_cohere: false,
     openai_max_context: max_4k,
     openai_max_tokens: 300,
     wrap_in_quotes: false,
@@ -255,8 +262,10 @@ const default_settings = {
     cohere_model: 'command-r-plus',
     perplexity_model: 'llama-3.1-70b-instruct',
     groq_model: 'llama-3.1-70b-versatile',
+    nanogpt_model: 'gpt-4o-mini',
     zerooneai_model: 'yi-large',
     blockentropy_model: 'be-70b-base-llama3.1',
+    deepseek_model: 'deepseek-chat',
     custom_model: '',
     custom_url: '',
     custom_include_body: '',
@@ -265,11 +274,11 @@ const default_settings = {
     windowai_model: '',
     openrouter_model: openrouter_website_model,
     openrouter_use_fallback: false,
-    openrouter_force_instruct: false,
     openrouter_group_models: false,
     openrouter_sort_models: 'alphabetically',
     openrouter_providers: [],
     openrouter_allow_fallbacks: true,
+    openrouter_middleout: openrouter_middleout_types.ON,
     jailbreak_system: false,
     reverse_proxy: '',
     chat_completion_source: chat_completion_sources.OPENAI,
@@ -279,7 +288,6 @@ const default_settings = {
     proxy_password: '',
     assistant_prefill: '',
     assistant_impersonation: '',
-    human_sysprompt_message: default_claude_human_sysprompt_message,
     claude_use_sysprompt: false,
     use_makersuite_sysprompt: true,
     use_alt_scale: false,
@@ -292,6 +300,7 @@ const default_settings = {
     names_behavior: character_names_behavior.DEFAULT,
     continue_postfix: continue_postfix_types.SPACE,
     custom_prompt_post_processing: custom_prompt_post_processing_types.NONE,
+    show_thoughts: false,
     seed: -1,
     n: 1,
 };
@@ -307,7 +316,6 @@ const oai_settings = {
     top_a_openai: 0,
     repetition_penalty_openai: 1,
     stream_openai: false,
-    websearch_cohere: false,
     openai_max_context: max_4k,
     openai_max_tokens: 300,
     wrap_in_quotes: false,
@@ -333,8 +341,10 @@ const oai_settings = {
     cohere_model: 'command-r-plus',
     perplexity_model: 'llama-3.1-70b-instruct',
     groq_model: 'llama-3.1-70b-versatile',
+    nanogpt_model: 'gpt-4o-mini',
     zerooneai_model: 'yi-large',
     blockentropy_model: 'be-70b-base-llama3.1',
+    deepseek_model: 'deepseek-chat',
     custom_model: '',
     custom_url: '',
     custom_include_body: '',
@@ -343,11 +353,11 @@ const oai_settings = {
     windowai_model: '',
     openrouter_model: openrouter_website_model,
     openrouter_use_fallback: false,
-    openrouter_force_instruct: false,
     openrouter_group_models: false,
     openrouter_sort_models: 'alphabetically',
     openrouter_providers: [],
     openrouter_allow_fallbacks: true,
+    openrouter_middleout: openrouter_middleout_types.ON,
     jailbreak_system: false,
     reverse_proxy: '',
     chat_completion_source: chat_completion_sources.OPENAI,
@@ -357,7 +367,6 @@ const oai_settings = {
     proxy_password: '',
     assistant_prefill: '',
     assistant_impersonation: '',
-    human_sysprompt_message: default_claude_human_sysprompt_message,
     claude_use_sysprompt: false,
     use_makersuite_sysprompt: true,
     use_alt_scale: false,
@@ -370,6 +379,7 @@ const oai_settings = {
     names_behavior: character_names_behavior.DEFAULT,
     continue_postfix: continue_postfix_types.SPACE,
     custom_prompt_post_processing: custom_prompt_post_processing_types.NONE,
+    show_thoughts: false,
     seed: -1,
     n: 1,
 };
@@ -386,8 +396,8 @@ export let selected_proxy = proxies[0];
 let openai_setting_names;
 let openai_settings;
 
-
-let promptManager = null;
+/** @type {import('./PromptManager.js').PromptManager} */
+export let promptManager = null;
 
 async function validateReverseProxy() {
     if (!oai_settings.reverse_proxy) {
@@ -398,7 +408,7 @@ async function validateReverseProxy() {
         new URL(oai_settings.reverse_proxy);
     }
     catch (err) {
-        toastr.error('Entered reverse proxy address is not a valid URL');
+        toastr.error(t`Entered reverse proxy address is not a valid URL`);
         setOnlineStatus('no_connection');
         resultCheckStatus();
         throw err;
@@ -409,115 +419,13 @@ async function validateReverseProxy() {
     const confirmation = skipConfirm || await Popup.show.confirm(t`Connecting To Proxy`, await renderTemplateAsync('proxyConnectionWarning', { proxyURL: DOMPurify.sanitize(oai_settings.reverse_proxy) }));
 
     if (!confirmation) {
-        toastr.error('Update or remove your reverse proxy settings.');
+        toastr.error(t`Update or remove your reverse proxy settings.`);
         setOnlineStatus('no_connection');
         resultCheckStatus();
         throw new Error('Proxy connection denied.');
     }
 
     localStorage.setItem(rememberKey, String(true));
-}
-
-/**
- * Converts the Chat Completion object to an Instruct Mode prompt string.
- * @param {object[]} messages Array of messages
- * @param {string} type Generation type
- * @returns {string} Text completion prompt
- */
-function convertChatCompletionToInstruct(messages, type) {
-    const newChatPrompts = [
-        substituteParams(oai_settings.new_chat_prompt),
-        substituteParams(oai_settings.new_example_chat_prompt),
-        substituteParams(oai_settings.new_group_chat_prompt),
-    ];
-    messages = messages.filter(x => !newChatPrompts.includes(x.content));
-
-    let chatMessagesText = '';
-    let systemPromptText = '';
-    let examplesText = '';
-
-    function getPrefix(message) {
-        let prefix;
-
-        if (message.role === 'user' || message.name === 'example_user') {
-            if (selected_group) {
-                prefix = '';
-            } else if (message.name === 'example_user') {
-                prefix = name1;
-            } else {
-                prefix = message.name ?? name1;
-            }
-        }
-
-        if (message.role === 'assistant' || message.name === 'example_assistant') {
-            if (selected_group) {
-                prefix = '';
-            }
-            else if (message.name === 'example_assistant') {
-                prefix = name2;
-            } else {
-                prefix = message.name ?? name2;
-            }
-        }
-
-        return prefix;
-    }
-
-    function toString(message) {
-        if (message.role === 'system' && !message.name) {
-            return message.content;
-        }
-
-        const prefix = getPrefix(message);
-        return prefix ? `${prefix}: ${message.content}` : message.content;
-    }
-
-    const firstChatMessage = messages.findIndex(message => message.role === 'assistant' || message.role === 'user');
-    const systemPromptMessages = messages.slice(0, firstChatMessage).filter(message => message.role === 'system' && !message.name);
-
-    if (systemPromptMessages.length) {
-        systemPromptText = systemPromptMessages.map(message => message.content).join('\n');
-        systemPromptText = formatInstructModeSystemPrompt(systemPromptText);
-    }
-
-    const exampleMessages = messages.filter(x => x.role === 'system' && (x.name === 'example_user' || x.name === 'example_assistant'));
-
-    if (exampleMessages.length) {
-        const blockHeading = power_user.context.example_separator ? (substituteParams(power_user.context.example_separator) + '\n') : '';
-        const examplesArray = exampleMessages.map(m => '<START>\n' + toString(m));
-        examplesText = blockHeading + formatInstructModeExamples(examplesArray, name1, name2).join('');
-    }
-
-    const chatMessages = messages.slice(firstChatMessage);
-
-    if (chatMessages.length) {
-        chatMessagesText = substituteParams(power_user.context.chat_start) + '\n';
-
-        for (const message of chatMessages) {
-            const name = getPrefix(message);
-            const isUser = message.role === 'user';
-            const isNarrator = message.role === 'system';
-            chatMessagesText += formatInstructModeChat(name, message.content, isUser, isNarrator, '', name1, name2, false);
-        }
-    }
-
-    const isImpersonate = type === 'impersonate';
-    const isContinue = type === 'continue';
-    const isQuiet = type === 'quiet';
-    const isQuietToLoud = false; // Quiet to loud not implemented for Chat Completion
-    const promptName = isImpersonate ? name1 : name2;
-    const promptLine = isContinue ? '' : formatInstructModePrompt(promptName, isImpersonate, '', name1, name2, isQuiet, isQuietToLoud).trimStart();
-
-    let prompt = [systemPromptText, examplesText, chatMessagesText, promptLine]
-        .filter(x => x)
-        .map(x => x.endsWith('\n') ? x : `${x}\n`)
-        .join('');
-
-    if (isContinue) {
-        prompt = prompt.replace(/\n$/, '');
-    }
-
-    return prompt;
 }
 
 /**
@@ -565,7 +473,8 @@ function setOpenAIMessages(chat) {
         if (role == 'user' && oai_settings.wrap_in_quotes) content = `"${content}"`;
         const name = chat[j]['name'];
         const image = chat[j]?.extra?.image;
-        messages[i] = { 'role': role, 'content': content, name: name, 'image': image };
+        const invocations = chat[j]?.extra?.tool_invocations;
+        messages[i] = { 'role': role, 'content': content, name: name, 'image': image, 'invocations': invocations };
         j++;
     }
 
@@ -651,11 +560,15 @@ function setupChatCompletionPromptManager(openAiSettings) {
  * @returns {Message[]} Array of message objects
  */
 export function parseExampleIntoIndividual(messageExampleString, appendNamesForGroup = true) {
+    const groupBotNames = getGroupNames().map(name => `${name}:`);
+
     let result = []; // array of msgs
     let tmp = messageExampleString.split('\n');
     let cur_msg_lines = [];
     let in_user = false;
     let in_bot = false;
+    let botName = name2;
+
     // DRY my cock and balls :)
     function add_msg(name, role, system_name) {
         // join different newlines (we split them by \n and join by \n)
@@ -679,10 +592,14 @@ export function parseExampleIntoIndividual(messageExampleString, appendNamesForG
             in_user = true;
             // we were in the bot mode previously, add the message
             if (in_bot) {
-                add_msg(name2, 'system', 'example_assistant');
+                add_msg(botName, 'system', 'example_assistant');
             }
             in_bot = false;
-        } else if (cur_str.startsWith(name2 + ':')) {
+        } else if (cur_str.startsWith(name2 + ':') || groupBotNames.some(n => cur_str.startsWith(n))) {
+            if (!cur_str.startsWith(name2 + ':') && groupBotNames.length) {
+                botName = cur_str.split(':')[0];
+            }
+
             in_bot = true;
             // we were in the user mode previously, add the message
             if (in_user) {
@@ -697,7 +614,7 @@ export function parseExampleIntoIndividual(messageExampleString, appendNamesForG
     if (in_user) {
         add_msg(name1, 'system', 'example_user');
     } else if (in_bot) {
-        add_msg(name2, 'system', 'example_assistant');
+        add_msg(botName, 'system', 'example_assistant');
     }
     return result;
 }
@@ -719,8 +636,9 @@ function formatWorldInfo(value) {
  *
  * @param {Prompt[]} prompts - Array containing injection prompts.
  * @param {Object[]} messages - Array containing all messages.
+ * @returns {Promise<Object[]>} - Array containing all messages with injections.
  */
-function populationInjectionPrompts(prompts, messages) {
+async function populationInjectionPrompts(prompts, messages) {
     let totalInsertedMessages = 0;
 
     const roleTypes = {
@@ -743,7 +661,7 @@ function populationInjectionPrompts(prompts, messages) {
             // Get prompts for current role
             const rolePrompts = depthPrompts.filter(prompt => prompt.role === role).map(x => x.content).join(separator);
             // Get extension prompt
-            const extensionPrompt = getExtensionPrompt(extension_prompt_types.IN_CHAT, i, separator, roleTypes[role], wrap);
+            const extensionPrompt = await getExtensionPrompt(extension_prompt_types.IN_CHAT, i, separator, roleTypes[role], wrap);
 
             const jointPrompt = [rolePrompts, extensionPrompt].filter(x => x).map(x => x.trim()).join(separator);
 
@@ -763,10 +681,6 @@ function populationInjectionPrompts(prompts, messages) {
     return messages;
 }
 
-export function isOpenRouterWithInstruct() {
-    return oai_settings.chat_completion_source === chat_completion_sources.OPENROUTER && oai_settings.openrouter_force_instruct && power_user.instruct.enabled;
-}
-
 /**
  * Populates the chat history of the conversation.
  * @param {object[]} messages - Array containing all messages.
@@ -784,21 +698,20 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
 
     // Reserve budget for new chat message
     const newChat = selected_group ? oai_settings.new_group_chat_prompt : oai_settings.new_chat_prompt;
-    const newChatMessage = new Message('system', substituteParams(newChat), 'newMainChat');
+    const newChatMessage = await Message.createAsync('system', substituteParams(newChat), 'newMainChat');
     chatCompletion.reserveBudget(newChatMessage);
 
     // Reserve budget for group nudge
     let groupNudgeMessage = null;
     const noGroupNudgeTypes = ['impersonate'];
     if (selected_group && prompts.has('groupNudge') && !noGroupNudgeTypes.includes(type)) {
-        groupNudgeMessage = Message.fromPrompt(prompts.get('groupNudge'));
+        groupNudgeMessage = await Message.fromPromptAsync(prompts.get('groupNudge'));
         chatCompletion.reserveBudget(groupNudgeMessage);
     }
 
     // Reserve budget for continue nudge
     let continueMessage = null;
-    const instruct = isOpenRouterWithInstruct();
-    if (type === 'continue' && cyclePrompt && !instruct && !oai_settings.continue_prefill) {
+    if (type === 'continue' && cyclePrompt && !oai_settings.continue_prefill) {
         const promptObject = {
             identifier: 'continueNudge',
             role: 'system',
@@ -807,17 +720,18 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
         };
         const continuePrompt = new Prompt(promptObject);
         const preparedPrompt = promptManager.preparePrompt(continuePrompt);
-        continueMessage = Message.fromPrompt(preparedPrompt);
+        continueMessage = await Message.fromPromptAsync(preparedPrompt);
         chatCompletion.reserveBudget(continueMessage);
     }
 
     const lastChatPrompt = messages[messages.length - 1];
-    const message = new Message('user', oai_settings.send_if_empty, 'emptyUserMessageReplacement');
+    const message = await Message.createAsync('user', oai_settings.send_if_empty, 'emptyUserMessageReplacement');
     if (lastChatPrompt && lastChatPrompt.role === 'assistant' && oai_settings.send_if_empty && chatCompletion.canAfford(message)) {
         chatCompletion.insert(message, 'chatHistory');
     }
 
     const imageInlining = isImageInliningSupported();
+    const canUseTools = ToolManager.isToolCallingSupported();
 
     // Insert chat messages as long as there is budget available
     const chatPool = [...messages].reverse();
@@ -828,19 +742,47 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
         // We do not want to mutate the prompt
         const prompt = new Prompt(chatPrompt);
         prompt.identifier = `chatHistory-${messages.length - index}`;
-        const chatMessage = Message.fromPrompt(promptManager.preparePrompt(prompt));
+        const chatMessage = await Message.fromPromptAsync(promptManager.preparePrompt(prompt));
 
         if (promptManager.serviceSettings.names_behavior === character_names_behavior.COMPLETION && prompt.name) {
             const messageName = promptManager.isValidName(prompt.name) ? prompt.name : promptManager.sanitizeName(prompt.name);
-            chatMessage.setName(messageName);
+            await chatMessage.setName(messageName);
         }
 
         if (imageInlining && chatPrompt.image) {
             await chatMessage.addImage(chatPrompt.image);
         }
 
+        if (canUseTools && Array.isArray(chatPrompt.invocations)) {
+            /** @type {import('./tool-calling.js').ToolInvocation[]} */
+            const invocations = chatPrompt.invocations;
+            const toolCallMessage = await Message.createAsync(chatMessage.role, undefined, 'toolCall-' + chatMessage.identifier);
+            const toolResultMessages = await Promise.all(invocations.slice().reverse().map((invocation) => Message.createAsync('tool', invocation.result || '[No content]', invocation.id)));
+            await toolCallMessage.setToolCalls(invocations);
+            if (chatCompletion.canAffordAll([toolCallMessage, ...toolResultMessages])) {
+                for (const resultMessage of toolResultMessages) {
+                    chatCompletion.insertAtStart(resultMessage, 'chatHistory');
+                }
+                chatCompletion.insertAtStart(toolCallMessage, 'chatHistory');
+            } else {
+                break;
+            }
+
+            continue;
+        }
+
         if (chatCompletion.canAfford(chatMessage)) {
             if (type === 'continue' && oai_settings.continue_prefill && chatPrompt === firstNonInjected) {
+                // in case we are using continue_prefill and the latest message is an assistant message, we want to prepend the users assistant prefill on the message
+                if (chatPrompt.role === 'assistant') {
+                    const supportsAssistantPrefill = oai_settings.chat_completion_source === chat_completion_sources.CLAUDE;
+                    const assistantPrefill = supportsAssistantPrefill ? substituteParams(oai_settings.assistant_prefill) : '';
+                    const messageContent = [assistantPrefill, chatMessage.content].filter(x => x).join('\n\n');
+                    const continueMessage = await Message.createAsync(chatMessage.role, messageContent, chatMessage.identifier);
+                    const collection = new MessageCollection('continuePrefill', continueMessage);
+                    chatCompletion.add(collection, -1);
+                    continue;
+                }
                 const collection = new MessageCollection('continuePrefill', chatMessage);
                 chatCompletion.add(collection, -1);
                 continue;
@@ -876,18 +818,17 @@ async function populateChatHistory(messages, prompts, chatCompletion, type = nul
  * @param {ChatCompletion} chatCompletion - An instance of ChatCompletion class that will be populated with the prompts.
  * @param {Object[]} messageExamples - Array containing all message examples.
  */
-function populateDialogueExamples(prompts, chatCompletion, messageExamples) {
+async function populateDialogueExamples(prompts, chatCompletion, messageExamples) {
     if (!prompts.has('dialogueExamples')) {
         return;
     }
 
     chatCompletion.add(new MessageCollection('dialogueExamples'), prompts.index('dialogueExamples'));
     if (Array.isArray(messageExamples) && messageExamples.length) {
-        const newExampleChat = new Message('system', substituteParams(oai_settings.new_example_chat_prompt), 'newChat');
-        [...messageExamples].forEach((dialogue, dialogueIndex) => {
-            let examplesAdded = 0;
-
-            if (chatCompletion.canAfford(newExampleChat)) chatCompletion.insert(newExampleChat, 'dialogueExamples');
+        const newExampleChat = await Message.createAsync('system', substituteParams(oai_settings.new_example_chat_prompt), 'newChat');
+        for (const dialogue of [...messageExamples]) {
+            const dialogueIndex = messageExamples.indexOf(dialogue);
+            const chatMessages = [];
 
             for (let promptIndex = 0; promptIndex < dialogue.length; promptIndex++) {
                 const prompt = dialogue[promptIndex];
@@ -895,19 +836,20 @@ function populateDialogueExamples(prompts, chatCompletion, messageExamples) {
                 const content = prompt.content || '';
                 const identifier = `dialogueExamples ${dialogueIndex}-${promptIndex}`;
 
-                const chatMessage = new Message(role, content, identifier);
-                chatMessage.setName(prompt.name);
-                if (!chatCompletion.canAfford(chatMessage)) {
-                    break;
-                }
-                chatCompletion.insert(chatMessage, 'dialogueExamples');
-                examplesAdded++;
+                const chatMessage = await Message.createAsync(role, content, identifier);
+                await chatMessage.setName(prompt.name);
+                chatMessages.push(chatMessage);
             }
 
-            if (0 === examplesAdded) {
-                chatCompletion.removeLastFrom('dialogueExamples');
+            if (!chatCompletion.canAffordAll([newExampleChat, ...chatMessages])) {
+                break;
             }
-        });
+
+            chatCompletion.insert(newExampleChat, 'dialogueExamples');
+            for (const chatMessage of chatMessages) {
+                chatCompletion.insert(chatMessage, 'dialogueExamples');
+            }
+        }
     }
 }
 
@@ -962,7 +904,7 @@ function getPromptRole(role) {
  */
 async function populateChatCompletion(prompts, chatCompletion, { bias, quietPrompt, quietImage, type, cyclePrompt, messages, messageExamples }) {
     // Helper function for preparing a prompt, that already exists within the prompt collection, for completion
-    const addToChatCompletion = (source, target = null) => {
+    const addToChatCompletion = async (source, target = null) => {
         // We need the prompts array to determine a position for the source.
         if (false === prompts.has(source)) return;
 
@@ -972,32 +914,39 @@ async function populateChatCompletion(prompts, chatCompletion, { bias, quietProm
         }
 
         const prompt = prompts.get(source);
+
+        if (prompt.injection_position === INJECTION_POSITION.ABSOLUTE) {
+            promptManager.log(`Skipping prompt ${source} because it is an absolute prompt`);
+            return;
+        }
+
         const index = target ? prompts.index(target) : prompts.index(source);
         const collection = new MessageCollection(source);
-        collection.add(Message.fromPrompt(prompt));
+        const message = await Message.fromPromptAsync(prompt);
+        collection.add(message);
         chatCompletion.add(collection, index);
     };
 
     chatCompletion.reserveBudget(3); // every reply is primed with <|start|>assistant<|message|>
     // Character and world information
-    addToChatCompletion('worldInfoBefore');
-    addToChatCompletion('main');
-    addToChatCompletion('worldInfoAfter');
-    addToChatCompletion('charDescription');
-    addToChatCompletion('charPersonality');
-    addToChatCompletion('scenario');
-    addToChatCompletion('personaDescription');
+    await addToChatCompletion('worldInfoBefore');
+    await addToChatCompletion('main');
+    await addToChatCompletion('worldInfoAfter');
+    await addToChatCompletion('charDescription');
+    await addToChatCompletion('charPersonality');
+    await addToChatCompletion('scenario');
+    await addToChatCompletion('personaDescription');
 
     // Collection of control prompts that will always be positioned last
     chatCompletion.setOverriddenPrompts(prompts.overriddenPrompts);
     const controlPrompts = new MessageCollection('controlPrompts');
 
-    const impersonateMessage = Message.fromPrompt(prompts.get('impersonate')) ?? null;
+    const impersonateMessage = await Message.fromPromptAsync(prompts.get('impersonate')) ?? null;
     if (type === 'impersonate') controlPrompts.add(impersonateMessage);
 
     // Add quiet prompt to control prompts
     // This should always be last, even in control prompts. Add all further control prompts BEFORE this prompt
-    const quietPromptMessage = Message.fromPrompt(prompts.get('quietPrompt')) ?? null;
+    const quietPromptMessage = await Message.fromPromptAsync(prompts.get('quietPrompt')) ?? null;
     if (quietPromptMessage && quietPromptMessage.content) {
         if (isImageInliningSupported() && quietImage) {
             await quietPromptMessage.addImage(quietImage);
@@ -1016,27 +965,30 @@ async function populateChatCompletion(prompts, chatCompletion, { bias, quietProm
             acc.push(prompt.identifier);
             return acc;
         }, []);
-    const userAbsolutePrompts = prompts.collection
-        .filter((prompt) => false === prompt.system_prompt && prompt.injection_position === INJECTION_POSITION.ABSOLUTE)
+    const absolutePrompts = prompts.collection
+        .filter((prompt) => prompt.injection_position === INJECTION_POSITION.ABSOLUTE)
         .reduce((acc, prompt) => {
             acc.push(prompt);
             return acc;
         }, []);
 
-    [...systemPrompts, ...userRelativePrompts].forEach(identifier => addToChatCompletion(identifier));
+    for (const identifier of [...systemPrompts, ...userRelativePrompts]) {
+        await addToChatCompletion(identifier);
+    }
 
     // Add enhance definition instruction
-    if (prompts.has('enhanceDefinitions')) addToChatCompletion('enhanceDefinitions');
+    if (prompts.has('enhanceDefinitions')) await addToChatCompletion('enhanceDefinitions');
 
     // Bias
-    if (bias && bias.trim().length) addToChatCompletion('bias');
+    if (bias && bias.trim().length) await addToChatCompletion('bias');
 
     // Tavern Extras - Summary
     if (prompts.has('summary')) {
         const summary = prompts.get('summary');
 
         if (summary.position) {
-            chatCompletion.insert(Message.fromPrompt(summary), 'main', summary.position);
+            const message = await Message.fromPromptAsync(summary);
+            chatCompletion.insert(message, 'main', summary.position);
         }
     }
 
@@ -1045,7 +997,8 @@ async function populateChatCompletion(prompts, chatCompletion, { bias, quietProm
         const authorsNote = prompts.get('authorsNote');
 
         if (authorsNote.position) {
-            chatCompletion.insert(Message.fromPrompt(authorsNote), 'main', authorsNote.position);
+            const message = await Message.fromPromptAsync(authorsNote);
+            chatCompletion.insert(message, 'main', authorsNote.position);
         }
     }
 
@@ -1054,7 +1007,8 @@ async function populateChatCompletion(prompts, chatCompletion, { bias, quietProm
         const vectorsMemory = prompts.get('vectorsMemory');
 
         if (vectorsMemory.position) {
-            chatCompletion.insert(Message.fromPrompt(vectorsMemory), 'main', vectorsMemory.position);
+            const message = await Message.fromPromptAsync(vectorsMemory);
+            chatCompletion.insert(message, 'main', vectorsMemory.position);
         }
     }
 
@@ -1063,7 +1017,8 @@ async function populateChatCompletion(prompts, chatCompletion, { bias, quietProm
         const vectorsDataBank = prompts.get('vectorsDataBank');
 
         if (vectorsDataBank.position) {
-            chatCompletion.insert(Message.fromPrompt(vectorsDataBank), 'main', vectorsDataBank.position);
+            const message = await Message.fromPromptAsync(vectorsDataBank);
+            chatCompletion.insert(message, 'main', vectorsDataBank.position);
         }
     }
 
@@ -1072,25 +1027,36 @@ async function populateChatCompletion(prompts, chatCompletion, { bias, quietProm
         const smartContext = prompts.get('smartContext');
 
         if (smartContext.position) {
-            chatCompletion.insert(Message.fromPrompt(smartContext), 'main', smartContext.position);
+            const message = await Message.fromPromptAsync(smartContext);
+            chatCompletion.insert(message, 'main', smartContext.position);
         }
     }
 
     // Other relative extension prompts
     for (const prompt of prompts.collection.filter(p => p.extension && p.position)) {
-        chatCompletion.insert(Message.fromPrompt(prompt), 'main', prompt.position);
+        const message = await Message.fromPromptAsync(prompt);
+        chatCompletion.insert(message, 'main', prompt.position);
+    }
+
+    // Pre-allocation of tokens for tool data
+    if (ToolManager.canPerformToolCalls(type)) {
+        const toolData = {};
+        await ToolManager.registerFunctionToolsOpenAI(toolData);
+        const toolMessage = [{ role: 'user', content: JSON.stringify(toolData) }];
+        const toolTokens = await tokenHandler.countAsync(toolMessage);
+        chatCompletion.reserveBudget(toolTokens);
     }
 
     // Add in-chat injections
-    messages = populationInjectionPrompts(userAbsolutePrompts, messages);
+    messages = await populationInjectionPrompts(absolutePrompts, messages);
 
     // Decide whether dialogue examples should always be added
     if (power_user.pin_examples) {
-        populateDialogueExamples(prompts, chatCompletion, messageExamples);
+        await populateDialogueExamples(prompts, chatCompletion, messageExamples);
         await populateChatHistory(messages, prompts, chatCompletion, type, cyclePrompt);
     } else {
         await populateChatHistory(messages, prompts, chatCompletion, type, cyclePrompt);
-        populateDialogueExamples(prompts, chatCompletion, messageExamples);
+        await populateDialogueExamples(prompts, chatCompletion, messageExamples);
     }
 
     chatCompletion.freeBudget(controlPrompts);
@@ -1113,9 +1079,9 @@ async function populateChatCompletion(prompts, chatCompletion, { bias, quietProm
  * @param {string} options.systemPromptOverride
  * @param {string} options.jailbreakPromptOverride
  * @param {string} options.personaDescription
- * @returns {Object} prompts - The prepared and merged system and user-defined prompts.
+ * @returns {Promise<Object>} prompts - The prepared and merged system and user-defined prompts.
  */
-function preparePromptsForChatCompletion({ Scenario, charPersonality, name2, worldInfoBefore, worldInfoAfter, charDescription, quietPrompt, bias, extensionPrompts, systemPromptOverride, jailbreakPromptOverride, personaDescription }) {
+async function preparePromptsForChatCompletion({ Scenario, charPersonality, name2, worldInfoBefore, worldInfoAfter, charDescription, quietPrompt, bias, extensionPrompts, systemPromptOverride, jailbreakPromptOverride, personaDescription }) {
     const scenarioText = Scenario && oai_settings.scenario_format ? substituteParams(oai_settings.scenario_format) : '';
     const charPersonalityText = charPersonality && oai_settings.personality_format ? substituteParams(oai_settings.personality_format) : '';
     const groupNudge = substituteParams(oai_settings.group_nudge_prompt);
@@ -1204,6 +1170,9 @@ function preparePromptsForChatCompletion({ Scenario, charPersonality, name2, wor
             if (!extensionPrompts[key].value) continue;
             if (![extension_prompt_types.BEFORE_PROMPT, extension_prompt_types.IN_PROMPT].includes(prompt.position)) continue;
 
+            const hasFilter = typeof prompt.filter === 'function';
+            if (hasFilter && !await prompt.filter()) continue;
+
             systemPrompts.push({
                 identifier: key.replace(/\W/g, '_'),
                 position: getPromptPosition(prompt.position),
@@ -1219,6 +1188,18 @@ function preparePromptsForChatCompletion({ Scenario, charPersonality, name2, wor
 
     // Merge system prompts with prompt manager prompts
     systemPrompts.forEach(prompt => {
+        const collectionPrompt = prompts.get(prompt.identifier);
+
+        // Apply system prompt role/depth overrides if they set in the prompt manager
+        if (collectionPrompt) {
+            // In-Chat / Relative
+            prompt.injection_position = collectionPrompt.injection_position ?? prompt.injection_position;
+            // Depth for In-Chat
+            prompt.injection_depth = collectionPrompt.injection_depth ?? prompt.injection_depth;
+            // Role (system, user, assistant)
+            prompt.role = collectionPrompt.role ?? prompt.role;
+        }
+
         const newPrompt = promptManager.preparePrompt(prompt);
         const markerIndex = prompts.index(prompt.identifier);
 
@@ -1228,7 +1209,8 @@ function preparePromptsForChatCompletion({ Scenario, charPersonality, name2, wor
 
     // Apply character-specific main prompt
     const systemPrompt = prompts.get('main') ?? null;
-    if (systemPromptOverride && systemPrompt && systemPrompt.forbid_overrides !== true) {
+    const isSystemPromptDisabled = promptManager.isPromptDisabledForActiveCharacter('main');
+    if (systemPromptOverride && systemPrompt && systemPrompt.forbid_overrides !== true && !isSystemPromptDisabled) {
         const mainOriginalContent = systemPrompt.content;
         systemPrompt.content = systemPromptOverride;
         const mainReplacement = promptManager.preparePrompt(systemPrompt, mainOriginalContent);
@@ -1237,7 +1219,8 @@ function preparePromptsForChatCompletion({ Scenario, charPersonality, name2, wor
 
     // Apply character-specific jailbreak
     const jailbreakPrompt = prompts.get('jailbreak') ?? null;
-    if (jailbreakPromptOverride && jailbreakPrompt && jailbreakPrompt.forbid_overrides !== true) {
+    const isJailbreakPromptDisabled = promptManager.isPromptDisabledForActiveCharacter('jailbreak');
+    if (jailbreakPromptOverride && jailbreakPrompt && jailbreakPrompt.forbid_overrides !== true && !isJailbreakPromptDisabled) {
         const jbOriginalContent = jailbreakPrompt.content;
         jailbreakPrompt.content = jailbreakPromptOverride;
         const jbReplacement = promptManager.preparePrompt(jailbreakPrompt, jbOriginalContent);
@@ -1302,7 +1285,7 @@ export async function prepareOpenAIMessages({
 
     try {
         // Merge markers and ordered user prompts with system prompts
-        const prompts = preparePromptsForChatCompletion({
+        const prompts = await preparePromptsForChatCompletion({
             Scenario,
             charPersonality,
             name2,
@@ -1324,15 +1307,15 @@ export async function prepareOpenAIMessages({
         await populateChatCompletion(prompts, chatCompletion, { bias, quietPrompt, quietImage, type, cyclePrompt, messages, messageExamples });
     } catch (error) {
         if (error instanceof TokenBudgetExceededError) {
-            toastr.error('An error occurred while counting tokens: Token budget exceeded.');
+            toastr.error(t`An error occurred while counting tokens: Token budget exceeded.`);
             chatCompletion.log('Token budget exceeded.');
-            promptManager.error = 'Not enough free tokens for mandatory prompts. Raise your token Limit or disable custom prompts.';
+            promptManager.error = t`Not enough free tokens for mandatory prompts. Raise your token Limit or disable custom prompts.`;
         } else if (error instanceof InvalidCharacterNameError) {
-            toastr.warning('An error occurred while counting tokens: Invalid character name');
+            toastr.warning(t`An error occurred while counting tokens: Invalid character name`);
             chatCompletion.log('Invalid character name');
-            promptManager.error = 'The name of at least one character contained whitespaces or special characters. Please check your user and character name.';
+            promptManager.error = t`The name of at least one character contained whitespaces or special characters. Please check your user and character name.`;
         } else {
-            toastr.error('An unknown error occurred while counting tokens. Further information may be available in console.');
+            toastr.error(t`An unknown error occurred while counting tokens. Further information may be available in console.`);
             chatCompletion.log('----- Unexpected error while preparing prompts -----');
             chatCompletion.log(error);
             chatCompletion.log(error.stack);
@@ -1343,7 +1326,7 @@ export async function prepareOpenAIMessages({
         promptManager.setChatCompletion(chatCompletion);
 
         if (oai_settings.squash_system_messages && dryRun == false) {
-            chatCompletion.squashSystemMessages();
+            await chatCompletion.squashSystemMessages();
         }
 
         // All information is up-to-date, render.
@@ -1355,11 +1338,16 @@ export async function prepareOpenAIMessages({
     const eventData = { chat, dryRun };
     await eventSource.emit(event_types.CHAT_COMPLETION_PROMPT_READY, eventData);
 
-    openai_messages_count = chat.filter(x => x?.role === 'user' || x?.role === 'assistant')?.length || 0;
+    openai_messages_count = chat.filter(x => !x?.tool_calls && (x?.role === 'user' || x?.role === 'assistant'))?.length || 0;
 
     return [chat, promptManager.tokenHandler.counts];
 }
 
+/**
+ * Handles errors during streaming requests.
+ * @param {Response} response
+ * @param {string} decoded - response text or decoded stream data
+ */
 function tryParseStreamingError(response, decoded) {
     try {
         const data = JSON.parse(decoded);
@@ -1370,6 +1358,9 @@ function tryParseStreamingError(response, decoded) {
 
         checkQuotaError(data);
         checkModerationError(data);
+
+        // these do not throw correctly (equiv to Error("[object Object]"))
+        // if trying to fix "[object Object]" displayed to users, start here
 
         if (data.error) {
             toastr.error(data.error.message || response.statusText, 'Chat Completion API');
@@ -1386,18 +1377,22 @@ function tryParseStreamingError(response, decoded) {
     }
 }
 
+/**
+ * Checks if the response contains a quota error and displays a popup if it does.
+ * @param data
+ * @returns {void}
+ * @throws {object} - response JSON
+ */
 function checkQuotaError(data) {
-    const errorText = `<h3>Encountered an error while processing your request.<br>
-    Check you have credits available on your
-    <a href="https://platform.openai.com/account/usage" target="_blank">OpenAI account</a>.<br>
-    If you have sufficient credits, please try again later.</h3>`;
-
     if (!data) {
         return;
     }
 
     if (data.quota_error) {
-        callPopup(errorText, 'text');
+        renderTemplateAsync('quotaError').then((html) => Popup.show.text('Quota Error', html));
+
+        // this does not throw correctly (equiv to Error("[object Object]"))
+        // if trying to fix "[object Object]" displayed to users, start here
         throw new Error(data);
     }
 }
@@ -3287,6 +3282,10 @@ function getChatCompletionModel() {
             return oai_settings.zerooneai_model;
         case chat_completion_sources.BLOCKENTROPY:
             return oai_settings.blockentropy_model;
+        case chat_completion_sources.NANOGPT:
+            return oai_settings.nanogpt_model;
+        case chat_completion_sources.DEEPSEEK:
+            return oai_settings.deepseek_model;
         default:
             throw new Error(`Unknown chat completion source: ${oai_settings.chat_completion_source}`);
     }
@@ -3417,6 +3416,69 @@ function saveModelList(data) {
 
         $('#model_blockentropy_select').val(oai_settings.blockentropy_model).trigger('change');
     }
+
+    if (oai_settings.chat_completion_source == chat_completion_sources.MISTRALAI) {
+        /** @type {HTMLSelectElement} */
+        const mistralModelSelect = document.querySelector('#model_mistralai_select');
+        if (mistralModelSelect) {
+            const options = Array.from(mistralModelSelect.options);
+            options.forEach((option) => {
+                const existingModel = model_list.find(model => model.id === option.value);
+                if (!existingModel) {
+                    option.remove();
+                }
+            });
+
+            const otherOptionsGroup = mistralModelSelect.querySelector('#mistralai_other_models');
+            for (const model of model_list.filter(model => model?.capabilities?.completion_chat)) {
+                if (!options.some(option => option.value === model.id) && otherOptionsGroup) {
+                    otherOptionsGroup.append(new Option(model.id, model.id));
+                }
+            }
+
+            const selectedModel = model_list.find(model => model.id === oai_settings.mistralai_model);
+            if (!selectedModel) {
+                oai_settings.mistralai_model = model_list.find(model => model?.capabilities?.completion_chat)?.id;
+                $('#model_mistralai_select').val(oai_settings.mistralai_model).trigger('change');
+            }
+        }
+    }
+
+    if (oai_settings.chat_completion_source == chat_completion_sources.NANOGPT) {
+        $('#model_nanogpt_select').empty();
+        model_list.forEach((model) => {
+            $('#model_nanogpt_select').append(
+                $('<option>', {
+                    value: model.id,
+                    text: model.id,
+                }));
+        });
+
+        const selectedModel = model_list.find(model => model.id === oai_settings.nanogpt_model);
+        if (model_list.length > 0 && (!selectedModel || !oai_settings.nanogpt_model)) {
+            oai_settings.nanogpt_model = model_list[0].id;
+        }
+
+        $('#model_nanogpt_select').val(oai_settings.nanogpt_model).trigger('change');
+    }
+
+    if (oai_settings.chat_completion_source == chat_completion_sources.DEEPSEEK) {
+        $('#model_deepseek_select').empty();
+        model_list.forEach((model) => {
+            $('#model_deepseek_select').append(
+                $('<option>', {
+                    value: model.id,
+                    text: model.id,
+                }));
+        });
+
+        const selectedModel = model_list.find(model => model.id === oai_settings.deepseek_model);
+        if (model_list.length > 0 && (!selectedModel || !oai_settings.deepseek_model)) {
+            oai_settings.deepseek_model = model_list[0].id;
+        }
+
+        $('#model_deepseek_select').val(oai_settings.deepseek_model).trigger('change');
+    }
 }
 
 function appendOpenRouterOptions(model_list, groupModels = false, sort = false) {
@@ -3522,6 +3584,15 @@ async function sendAltScaleRequest(messages, logit_bias, signal, type) {
     return data.output;
 }
 
+/**
+ * Send a chat completion request to backend
+ * @param {string} type (impersonate, quiet, continue, etc)
+ * @param {Array} messages
+ * @param {AbortSignal?} signal
+ * @returns {Promise<unknown>}
+ * @throws {Error}
+ */
+
 async function sendOpenAIRequest(type, messages, signal, chat_id) {
     // Provide default abort signal
     if (!signal) {
@@ -3536,7 +3607,6 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
     messages = messages.filter(msg => msg && typeof msg === 'object');
 
     let logit_bias = {};
-    const messageId = getNextMessageId(type);
     const isClaude = oai_settings.chat_completion_source == chat_completion_sources.CLAUDE;
     const isOpenRouter = oai_settings.chat_completion_source == chat_completion_sources.OPENROUTER;
     const isScale = oai_settings.chat_completion_source == chat_completion_sources.SCALE;
@@ -3548,18 +3618,15 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
     const isPerplexity = oai_settings.chat_completion_source == chat_completion_sources.PERPLEXITY;
     const isGroq = oai_settings.chat_completion_source == chat_completion_sources.GROQ;
     const is01AI = oai_settings.chat_completion_source == chat_completion_sources.ZEROONEAI;
-    const isTextCompletion = (isOAI && textCompletionModels.includes(oai_settings.openai_model)) || (isOpenRouter && oai_settings.openrouter_force_instruct && power_user.instruct.enabled);
+    const isNano = oai_settings.chat_completion_source == chat_completion_sources.NANOGPT;
+    const isDeepSeek = oai_settings.chat_completion_source == chat_completion_sources.DEEPSEEK;
+    const isTextCompletion = isOAI && textCompletionModels.includes(oai_settings.openai_model);
     const isQuiet = type === 'quiet';
     const isImpersonate = type === 'impersonate';
     const isContinue = type === 'continue';
     const stream = oai_settings.stream_openai && !isQuiet && !isScale && !(isGoogle && oai_settings.google_model.includes('bison')) && !(isOAI && oai_settings.openai_model.startsWith('o1-'));
     const useLogprobs = !!power_user.request_token_probabilities;
     const canMultiSwipe = oai_settings.n > 1 && !isContinue && !isImpersonate && !isQuiet && (isOAI || isCustom);
-
-    if (isTextCompletion && isOpenRouter) {
-        messages = convertChatCompletionToInstruct(messages, type);
-        replaceItemizedPromptText(messageId, messages);
-    }
 
     // If we're using the window.ai extension, use that instead
     // Doesn't support logit bias yet
@@ -3574,6 +3641,10 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
         && oai_settings.bias_presets[oai_settings.bias_preset_selected].length) {
         logit_bias = biasCache || await calculateLogitBias();
         biasCache = logit_bias;
+    }
+
+    if (Object.keys(logit_bias).length === 0) {
+        logit_bias = undefined;
     }
 
     if (isScale && oai_settings.use_alt_scale) {
@@ -3596,6 +3667,8 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
         'n': canMultiSwipe ? oai_settings.n : undefined,
         'user_name': name1,
         'char_name': name2,
+        'group_names': getGroupNames(),
+        'show_thoughts': Boolean(oai_settings.show_thoughts),
     };
 
     // Empty array will produce a validation error
@@ -3611,7 +3684,7 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
     }
 
     // Add logprobs request (currently OpenAI only, max 5 on their side)
-    if (useLogprobs && (isOAI || isCustom)) {
+    if (useLogprobs && (isOAI || isCustom || isDeepSeek)) {
         generate_data['logprobs'] = 5;
     }
 
@@ -3626,9 +3699,8 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
         generate_data['top_k'] = Number(oai_settings.top_k_openai);
         generate_data['claude_use_sysprompt'] = oai_settings.claude_use_sysprompt;
         generate_data['stop'] = getCustomStoppingStrings(); // Claude shouldn't have limits on stop strings.
-        generate_data['human_sysprompt_message'] = substituteParams(oai_settings.human_sysprompt_message);
-        // Don't add a prefill on quiet gens (summarization)
-        if (!isQuiet) {
+        // Don't add a prefill on quiet gens (summarization) and when using continue prefill.
+        if (!isQuiet && !(isContinue && oai_settings.continue_prefill)) {
             generate_data['assistant_prefill'] = isImpersonate ? substituteParams(oai_settings.assistant_impersonation) : substituteParams(oai_settings.assistant_prefill);
         }
     }
@@ -3641,6 +3713,7 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
         generate_data['use_fallback'] = oai_settings.openrouter_use_fallback;
         generate_data['provider'] = oai_settings.openrouter_providers;
         generate_data['allow_fallbacks'] = oai_settings.openrouter_allow_fallbacks;
+        generate_data['middleout'] = oai_settings.openrouter_middleout;
 
         if (isTextCompletion) {
             generate_data['stop'] = getStoppingStrings(isImpersonate, isContinue);
@@ -3652,10 +3725,9 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
     }
 
     if (isGoogle) {
-        const nameStopString = isImpersonate ? `\n${name2}:` : `\n${name1}:`;
-        const stopStringsLimit = 3; // 5 - 2 (nameStopString and new_chat_prompt)
+        const stopStringsLimit = 5;
         generate_data['top_k'] = Number(oai_settings.top_k_openai);
-        generate_data['stop'] = [nameStopString, substituteParams(oai_settings.new_chat_prompt), ...getCustomStoppingStrings(stopStringsLimit)];
+        generate_data['stop'] = getCustomStoppingStrings(stopStringsLimit).slice(0, stopStringsLimit).filter(x => x.length >= 1 && x.length <= 16);
         generate_data['use_makersuite_sysprompt'] = oai_settings.use_makersuite_sysprompt;
     }
 
@@ -3679,7 +3751,6 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
         generate_data['frequency_penalty'] = Math.min(Math.max(Number(oai_settings.freq_pen_openai), 0), 1);
         generate_data['presence_penalty'] = Math.min(Math.max(Number(oai_settings.pres_pen_openai), 0), 1);
         generate_data['stop'] = getCustomStoppingStrings(5);
-        generate_data['websearch'] = oai_settings.websearch_cohere;
     }
 
     if (isPerplexity) {
@@ -3711,7 +3782,12 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
         delete generate_data.stop;
     }
 
-    if ((isOAI || isOpenRouter || isMistral || isCustom || isCohere) && oai_settings.seed >= 0) {
+    // https://api-docs.deepseek.com/api/create-chat-completion
+    if (isDeepSeek) {
+        generate_data.top_p = generate_data.top_p || Number.EPSILON;
+    }
+
+    if ((isOAI || isOpenRouter || isMistral || isCustom || isCohere || isNano) && oai_settings.seed >= 0) {
         generate_data['seed'] = oai_settings.seed;
     }
 
@@ -3740,8 +3816,8 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
     }
 
 
-    if (isFunctionCallingSupported() && !stream) {
-        await registerFunctionTools(type, generate_data);
+    if (!canMultiSwipe && ToolManager.canPerformToolCalls(type)) {
+        await ToolManager.registerFunctionToolsOpenAI(generate_data);
     }
 
     if (isOAI && oai_settings.openai_model.startsWith('o1-')) {
@@ -3788,6 +3864,7 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
         return async function* streamData() {
             let text = '';
             const swipes = [];
+            const toolCalls = [];
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
@@ -3803,7 +3880,9 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
                     text += getStreamingReply(parsed);
                 }
 
-                yield { text, swipes: swipes, logprobs: parseChatCompletionLogprobs(parsed) };
+                ToolManager.parseToolCalls(toolCalls, parsed);
+
+                yield { text, swipes: swipes, logprobs: parseChatCompletionLogprobs(parsed), toolCalls: toolCalls };
             }
             if (power_user.absoluteRPGAdventure) {
                 const data = await ARA_getResult(text, chat_id, generate_data_prev, null);
@@ -3821,8 +3900,9 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
         checkModerationError(data);
 
         if (data.error) {
-            toastr.error(data.error.message || response.statusText, 'API returned an error');
-            throw new Error(data);
+            const message = data.error.message || response.statusText || t`Unknown error`;
+            toastr.error(message, t`API returned an error`);
+            throw new Error(message);
         }
 
         if (type !== 'quiet') {
@@ -3832,154 +3912,19 @@ async function sendOpenAIRequest(type, messages, signal, chat_id) {
             delay(1).then(() => saveLogprobsForActiveMessage(logprobs, null));
         }
 
-        if (isFunctionCallingSupported()) {
-            await checkFunctionToolCalls(data);
-        }
-
         return data;
     }
 }
 
-/**
- * Register function tools for the next chat completion request.
- * @param {string} type Generation type
- * @param {object} data Generation data
- */
-async function registerFunctionTools(type, data) {
-    let toolChoice = 'auto';
-    const tools = [];
-
-    /**
-     * @type {registerFunctionTool}
-     */
-    const registerFunctionTool = (name, description, parameters, required) => {
-        tools.push({
-            type: 'function',
-            function: {
-                name,
-                description,
-                parameters,
-            },
-        });
-
-        if (required) {
-            toolChoice = 'required';
-        }
-    };
-
-    /**
-     * @type {FunctionToolRegister}
-     */
-    const args = {
-        type,
-        data,
-        registerFunctionTool,
-    };
-
-    await eventSource.emit(event_types.LLM_FUNCTION_TOOL_REGISTER, args);
-
-    if (tools.length) {
-        console.log('Registered function tools:', tools);
-
-        data['tools'] = tools;
-        data['tool_choice'] = toolChoice;
-    }
-}
-
-async function checkFunctionToolCalls(data) {
-    const oaiCompat = [
-        chat_completion_sources.OPENAI,
-        chat_completion_sources.CUSTOM,
-        chat_completion_sources.MISTRALAI,
-        chat_completion_sources.OPENROUTER,
-        chat_completion_sources.GROQ,
-    ];
-    if (oaiCompat.includes(oai_settings.chat_completion_source)) {
-        if (!Array.isArray(data?.choices)) {
-            return;
-        }
-
-        // Find a choice with 0-index
-        const choice = data.choices.find(choice => choice.index === 0);
-
-        if (!choice) {
-            return;
-        }
-
-        const toolCalls = choice.message.tool_calls;
-
-        if (!Array.isArray(toolCalls)) {
-            return;
-        }
-
-        for (const toolCall of toolCalls) {
-            if (typeof toolCall.function !== 'object') {
-                continue;
-            }
-
-            /** @type {FunctionToolCall} */
-            const args = toolCall.function;
-            console.log('Function tool call:', toolCall);
-            await eventSource.emit(event_types.LLM_FUNCTION_TOOL_CALL, args);
-        }
-    }
-
-    if ([chat_completion_sources.CLAUDE].includes(oai_settings.chat_completion_source)) {
-        if (!Array.isArray(data?.content)) {
-            return;
-        }
-
-        for (const content of data.content) {
-            if (content.type === 'tool_use') {
-                /** @type {FunctionToolCall} */
-                const args = { name: content.name, arguments: JSON.stringify(content.input) };
-                await eventSource.emit(event_types.LLM_FUNCTION_TOOL_CALL, args);
-            }
-        }
-    }
-
-    if ([chat_completion_sources.COHERE].includes(oai_settings.chat_completion_source)) {
-        if (!Array.isArray(data?.tool_calls)) {
-            return;
-        }
-
-        for (const toolCall of data.tool_calls) {
-            /** @type {FunctionToolCall} */
-            const args = { name: toolCall.name, arguments: JSON.stringify(toolCall.parameters) };
-            console.log('Function tool call:', toolCall);
-            await eventSource.emit(event_types.LLM_FUNCTION_TOOL_CALL, args);
-        }
-    }
-}
-
-export function isFunctionCallingSupported() {
-    if (main_api !== 'openai') {
-        return false;
-    }
-
-    if (!oai_settings.function_calling) {
-        return false;
-    }
-
-    const supportedSources = [
-        chat_completion_sources.OPENAI,
-        chat_completion_sources.COHERE,
-        chat_completion_sources.CUSTOM,
-        chat_completion_sources.MISTRALAI,
-        chat_completion_sources.CLAUDE,
-        chat_completion_sources.OPENROUTER,
-        chat_completion_sources.GROQ,
-    ];
-    return supportedSources.includes(oai_settings.chat_completion_source);
-}
-
 function getStreamingReply(data) {
-    if (oai_settings.chat_completion_source == chat_completion_sources.CLAUDE) {
+    if (oai_settings.chat_completion_source === chat_completion_sources.CLAUDE) {
         return data?.delta?.text || '';
-    } else if (oai_settings.chat_completion_source == chat_completion_sources.MAKERSUITE) {
-        return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else if (oai_settings.chat_completion_source === chat_completion_sources.MAKERSUITE) {
+        return data?.candidates?.[0]?.content?.parts?.filter(x => oai_settings.show_thoughts || !x.thought)?.map(x => x.text)?.filter(x => x)?.join('\n\n') || '';
+    } else if (oai_settings.chat_completion_source === chat_completion_sources.COHERE) {
+        return data?.delta?.message?.content?.text || data?.delta?.message?.tool_plan || '';
     } else {
-        return data.choices[0]?.delta?.content ?? data.choices[0]?.message?.content ?? data.choices[0]?.text ?? '';
+        return data.choices?.[0]?.delta?.content ?? data.choices?.[0]?.message?.content ?? data.choices?.[0]?.text ?? '';
     }
 }
 
@@ -3987,7 +3932,7 @@ function getStreamingReply(data) {
  * parseChatCompletionLogprobs converts the response data returned from a chat
  * completions-like source into an array of TokenLogprobs found in the response.
  * @param {Object} data - response data from a chat completions-like source
- * @returns {import('logprobs.js').TokenLogprobs[] | null} converted logprobs
+ * @returns {import('./logprobs.js').TokenLogprobs[] | null} converted logprobs
  */
 function parseChatCompletionLogprobs(data) {
     if (!data) {
@@ -3996,6 +3941,7 @@ function parseChatCompletionLogprobs(data) {
 
     switch (oai_settings.chat_completion_source) {
         case chat_completion_sources.OPENAI:
+        case chat_completion_sources.DEEPSEEK:
         case chat_completion_sources.CUSTOM:
             if (!data.choices?.length) {
                 return null;
@@ -4016,7 +3962,7 @@ function parseChatCompletionLogprobs(data) {
  * completion API and converts into the structure used by the Token Probabilities
  * view.
  * @param {{content: { token: string, logprob: number, top_logprobs: { token: string, logprob: number }[] }[]}} logprobs
- * @returns {import('logprobs.js').TokenLogprobs[] | null} converted logprobs
+ * @returns {import('./logprobs.js').TokenLogprobs[] | null} converted logprobs
  */
 function parseOpenAIChatLogprobs(logprobs) {
     const { content } = logprobs ?? {};
@@ -4044,7 +3990,7 @@ function parseOpenAIChatLogprobs(logprobs) {
  * completion API and converts into the structure used by the Token Probabilities
  * view.
  * @param {{tokens: string[], token_logprobs: number[], top_logprobs: { token: string, logprob: number }[][]}} logprobs
- * @returns {import('logprobs.js').TokenLogprobs[] | null} converted logprobs
+ * @returns {import('./logprobs.js').TokenLogprobs[] | null} converted logprobs
  */
 function parseOpenAITextLogprobs(logprobs) {
     const { tokens, token_logprobs, top_logprobs } = logprobs ?? {};
@@ -4068,7 +4014,7 @@ function parseOpenAITextLogprobs(logprobs) {
 
 function handleWindowError(err) {
     const text = parseWindowError(err);
-    toastr.error(text, 'Window.ai returned an error');
+    toastr.error(text, t`Window.ai returned an error`);
     throw err;
 }
 
@@ -4117,8 +4063,11 @@ async function calculateLogitBias() {
 }
 
 class TokenHandler {
-    constructor(countTokenFn) {
-        this.countTokenFn = countTokenFn;
+    /**
+     * @param {(messages: object[] | object, full?: boolean) => Promise<number>} countTokenAsyncFn Function to count tokens
+     */
+    constructor(countTokenAsyncFn) {
+        this.countTokenAsyncFn = countTokenAsyncFn;
         this.counts = {
             'start_chat': 0,
             'prompt': 0,
@@ -4147,8 +4096,15 @@ class TokenHandler {
         this.counts[type] -= value;
     }
 
-    count(messages, full, type) {
-        const token_count = this.countTokenFn(messages, full);
+    /**
+     * Count tokens for a message or messages.
+     * @param {object|any[]} messages Messages to count tokens for
+     * @param {boolean} [full] Count full tokens
+     * @param {string} [type] Identifier for the token count
+     * @returns {Promise<number>} The token count
+     */
+    async countAsync(messages, full, type) {
+        const token_count = await this.countTokenAsyncFn(messages, full);
         this.counts[type] += token_count;
 
         return token_count;
@@ -4168,13 +4124,14 @@ class TokenHandler {
 }
 
 
-let tokenHandler = new TokenHandler((messages, full) => {
+const tokenHandler = new TokenHandler(async (messages, full = false) => {
     if (power_user.absoluteRPGAdventure) {
         // HACK: when absoluteRPGAdventure is enabled, the entire prompt should be sent to the server, this is one way to do it I guess
         return 0;
     }
-    return countTokensOpenAI(messages, full);
+    return countTokensOpenAIAsync(messages, full);
 });
+
 
 
 // Thrown by ChatCompletion when a requested prompt couldn't be found.
@@ -4217,12 +4174,15 @@ class Message {
     content;
     /** @type {string} */
     name;
+    /** @type {object} */
+    tool_call = null;
 
     /**
      * @constructor
      * @param {string} role - The role of the entity creating the message.
      * @param {string} content - The actual content of the message.
      * @param {string} identifier - A unique identifier for the message.
+     * @private Don't use this constructor directly. Use createAsync instead.
      */
     constructor(role, content, identifier) {
         this.identifier = identifier;
@@ -4234,18 +4194,58 @@ class Message {
             this.role = 'system';
         }
 
-        if (typeof this.content === 'string' && this.content.length > 0) {
-            this.tokens = tokenHandler.count({ role: this.role, content: this.content });
-        } else {
-            this.tokens = 0;
+        this.tokens = 0;
+    }
+
+    /**
+     * Create a new Message instance.
+     * @param {string} role
+     * @param {string} content
+     * @param {string} identifier
+     * @returns {Promise<Message>} Message instance
+     */
+    static async createAsync(role, content, identifier) {
+        const message = new Message(role, content, identifier);
+
+        if (typeof message.content === 'string' && message.content.length > 0) {
+            message.tokens = await tokenHandler.countAsync({ role: message.role, content: message.content });
         }
+
+        return message;
     }
 
-    setName(name) {
+    /**
+     * Reconstruct the message from a tool invocation.
+     * @param {import('./tool-calling.js').ToolInvocation[]} invocations - The tool invocations to reconstruct the message from.
+     * @returns {Promise<void>}
+     */
+    async setToolCalls(invocations) {
+        this.tool_calls = invocations.map(i => ({
+            id: i.id,
+            type: 'function',
+            function: {
+                arguments: i.parameters,
+                name: i.name,
+            },
+        }));
+        this.tokens = await tokenHandler.countAsync({ role: this.role, tool_calls: JSON.stringify(this.tool_calls) });
+    }
+
+    /**
+     * Add a name to the message.
+     * @param {string} name Name to set for the message.
+     * @returns {Promise<void>}
+     */
+    async setName(name) {
         this.name = name;
-        this.tokens = tokenHandler.count({ role: this.role, content: this.content, name: this.name });
+        this.tokens = await tokenHandler.countAsync({ role: this.role, content: this.content, name: this.name });
     }
 
+    /**
+     * Adds an image to the message.
+     * @param {string} image Image URL or Data URL.
+     * @returns {Promise<void>}
+     */
     async addImage(image) {
         const textContent = this.content;
         const isDataUrl = isDataURL(image);
@@ -4335,13 +4335,13 @@ class Message {
     }
 
     /**
-     * Create a new Message instance from a prompt.
+     * Create a new Message instance from a prompt asynchronously.
      * @static
      * @param {Object} prompt - The prompt object.
-     * @returns {Message} A new instance of Message.
+     * @returns {Promise<Message>} A new instance of Message.
      */
-    static fromPrompt(prompt) {
-        return new Message(prompt.role, prompt.content, prompt.identifier);
+    static fromPromptAsync(prompt) {
+        return Message.createAsync(prompt.role, prompt.content, prompt.identifier);
     }
 
     /**
@@ -4377,13 +4377,20 @@ class MessageCollection {
     }
 
     /**
-     * Get chat in the format of {role, name, content}.
+     * Get chat in the format of {role, name, content, tool_calls}.
      * @returns {Array} Array of objects with role, name, and content properties.
      */
     getChat() {
         return this.collection.reduce((acc, message) => {
-            const name = message.name;
-            if (message.content) acc.push({ role: message.role, ...(name && { name }), content: message.content });
+            if (message.content || message.tool_calls) {
+                acc.push({
+                    role: message.role,
+                    content: message.content,
+                    ...(message.name && { name: message.name }),
+                    ...(message.tool_calls && { tool_calls: message.tool_calls }),
+                    ...(message.role === 'tool' && { tool_call_id: message.identifier }),
+                });
+            }
             return acc;
         }, []);
     }
@@ -4460,8 +4467,9 @@ export class ChatCompletion {
 
     /**
      * Combines consecutive system messages into one if they have no name attached.
+     * @returns {Promise<void>}
      */
-    squashSystemMessages() {
+    async squashSystemMessages() {
         const excludeList = ['newMainChat', 'newChat', 'groupNudge'];
         this.messages.collection = this.messages.flatten();
 
@@ -4481,7 +4489,7 @@ export class ChatCompletion {
             if (shouldSquash(message)) {
                 if (lastMessage && shouldSquash(lastMessage)) {
                     lastMessage.content += '\n' + message.content;
-                    lastMessage.tokens = tokenHandler.count({ role: lastMessage.role, content: lastMessage.content });
+                    lastMessage.tokens = await tokenHandler.countAsync({ role: lastMessage.role, content: lastMessage.content });
                 }
                 else {
                     squashedMessages.push(message);
@@ -4588,7 +4596,7 @@ export class ChatCompletion {
         this.checkTokenBudget(message, message.identifier);
 
         const index = this.findMessageIndex(identifier);
-        if (message.content) {
+        if (message.content || message.tool_calls) {
             if ('start' === position) this.messages.collection[index].collection.unshift(message);
             else if ('end' === position) this.messages.collection[index].collection.push(message);
             else if (typeof position === 'number') this.messages.collection[index].collection.splice(position, 0, message);
@@ -4629,6 +4637,15 @@ export class ChatCompletion {
     }
 
     /**
+     * Checks if the token budget can afford the tokens of all the specified messages.
+     * @param {Message[]} messages - The messages to check for affordability.
+     * @returns {boolean} True if the budget can afford all the messages, false otherwise.
+     */
+    canAffordAll(messages) {
+        return 0 <= this.tokenBudget - messages.reduce((total, message) => total + message.getTokens(), 0);
+    }
+
+    /**
      * Checks if a message with the specified identifier exists in the collection.
      *
      * @param {string} identifier - The identifier to check for existence.
@@ -4657,11 +4674,17 @@ export class ChatCompletion {
         for (let item of this.messages.collection) {
             if (item instanceof MessageCollection) {
                 chat.push(...item.getChat());
-            } else if (item instanceof Message && item.content) {
-                const message = { role: item.role, content: item.content, ...(item.name ? { name: item.name } : {}) };
+            } else if (item instanceof Message && (item.content || item.tool_calls)) {
+                const message = {
+                    role: item.role,
+                    content: item.content,
+                    ...(item.name ? { name: item.name } : {}),
+                    ...(item.tool_calls ? { tool_calls: item.tool_calls } : {}),
+                    ...(item.role === 'tool' ? { tool_call_id: item.identifier } : {}),
+                };
                 chat.push(message);
             } else {
-                console.warn('Invalid message in collection', item);
+                this.log(`Skipping invalid or empty message in collection: ${JSON.stringify(item)}`);
             }
         }
         return chat;
@@ -4822,7 +4845,6 @@ function loadOpenAISettings(data, settings) {
     oai_settings.min_p_openai = settings.min_p_openai ?? default_settings.min_p_openai;
     oai_settings.repetition_penalty_openai = settings.repetition_penalty_openai ?? default_settings.repetition_penalty_openai;
     oai_settings.stream_openai = settings.stream_openai ?? default_settings.stream_openai;
-    oai_settings.websearch_cohere = settings.websearch_cohere ?? default_settings.websearch_cohere;
     oai_settings.openai_max_context = settings.openai_max_context ?? default_settings.openai_max_context;
     oai_settings.openai_max_tokens = settings.openai_max_tokens ?? default_settings.openai_max_tokens;
     oai_settings.bias_preset_selected = settings.bias_preset_selected ?? default_settings.bias_preset_selected;
@@ -4839,13 +4861,15 @@ function loadOpenAISettings(data, settings) {
     oai_settings.openrouter_group_models = settings.openrouter_group_models ?? default_settings.openrouter_group_models;
     oai_settings.openrouter_sort_models = settings.openrouter_sort_models ?? default_settings.openrouter_sort_models;
     oai_settings.openrouter_use_fallback = settings.openrouter_use_fallback ?? default_settings.openrouter_use_fallback;
-    oai_settings.openrouter_force_instruct = settings.openrouter_force_instruct ?? default_settings.openrouter_force_instruct;
     oai_settings.openrouter_allow_fallbacks = settings.openrouter_allow_fallbacks ?? default_settings.openrouter_allow_fallbacks;
+    oai_settings.openrouter_middleout = settings.openrouter_middleout ?? default_settings.openrouter_middleout;
     oai_settings.ai21_model = settings.ai21_model ?? default_settings.ai21_model;
     oai_settings.mistralai_model = settings.mistralai_model ?? default_settings.mistralai_model;
     oai_settings.cohere_model = settings.cohere_model ?? default_settings.cohere_model;
     oai_settings.perplexity_model = settings.perplexity_model ?? default_settings.perplexity_model;
     oai_settings.groq_model = settings.groq_model ?? default_settings.groq_model;
+    oai_settings.nanogpt_model = settings.nanogpt_model ?? default_settings.nanogpt_model;
+    oai_settings.deepseek_model = settings.deepseek_model ?? default_settings.deepseek_model;
     oai_settings.blockentropy_model = settings.blockentropy_model ?? default_settings.blockentropy_model;
     oai_settings.zerooneai_model = settings.zerooneai_model ?? default_settings.zerooneai_model;
     oai_settings.custom_model = settings.custom_model ?? default_settings.custom_model;
@@ -4861,10 +4885,10 @@ function loadOpenAISettings(data, settings) {
     oai_settings.proxy_password = settings.proxy_password ?? default_settings.proxy_password;
     oai_settings.assistant_prefill = settings.assistant_prefill ?? default_settings.assistant_prefill;
     oai_settings.assistant_impersonation = settings.assistant_impersonation ?? default_settings.assistant_impersonation;
-    oai_settings.human_sysprompt_message = settings.human_sysprompt_message ?? default_settings.human_sysprompt_message;
     oai_settings.image_inlining = settings.image_inlining ?? default_settings.image_inlining;
     oai_settings.inline_image_quality = settings.inline_image_quality ?? default_settings.inline_image_quality;
     oai_settings.bypass_status_check = settings.bypass_status_check ?? default_settings.bypass_status_check;
+    oai_settings.show_thoughts = settings.show_thoughts ?? default_settings.show_thoughts;
     oai_settings.seed = settings.seed ?? default_settings.seed;
     oai_settings.n = settings.n ?? default_settings.n;
 
@@ -4897,12 +4921,10 @@ function loadOpenAISettings(data, settings) {
     if (settings.use_makersuite_sysprompt !== undefined) oai_settings.use_makersuite_sysprompt = !!settings.use_makersuite_sysprompt;
     if (settings.use_alt_scale !== undefined) { oai_settings.use_alt_scale = !!settings.use_alt_scale; updateScaleForm(); }
     $('#stream_toggle').prop('checked', oai_settings.stream_openai);
-    $('#websearch_toggle').prop('checked', oai_settings.websearch_cohere);
     $('#api_url_scale').val(oai_settings.api_url_scale);
     $('#openai_proxy_password').val(oai_settings.proxy_password);
     $('#claude_assistant_prefill').val(oai_settings.assistant_prefill);
     $('#claude_assistant_impersonation').val(oai_settings.assistant_impersonation);
-    $('#claude_human_sysprompt_textarea').val(oai_settings.human_sysprompt_message);
     $('#openai_image_inlining').prop('checked', oai_settings.image_inlining);
     $('#openai_bypass_status_check').prop('checked', oai_settings.bypass_status_check);
 
@@ -4927,6 +4949,10 @@ function loadOpenAISettings(data, settings) {
     $(`#model_perplexity_select option[value="${oai_settings.perplexity_model}"`).attr('selected', true);
     $('#model_groq_select').val(oai_settings.groq_model);
     $(`#model_groq_select option[value="${oai_settings.groq_model}"`).attr('selected', true);
+    $('#model_nanogpt_select').val(oai_settings.nanogpt_model);
+    $(`#model_nanogpt_select option[value="${oai_settings.nanogpt_model}"`).attr('selected', true);
+    $('#model_deepseek_select').val(oai_settings.deepseek_model);
+    $(`#model_deepseek_select option[value="${oai_settings.deepseek_model}"`).prop('selected', true);
     $('#model_01ai_select').val(oai_settings.zerooneai_model);
     $('#model_blockentropy_select').val(oai_settings.blockentropy_model);
     $('#custom_model_id').val(oai_settings.custom_model);
@@ -4946,10 +4972,10 @@ function loadOpenAISettings(data, settings) {
     $('#use_makersuite_sysprompt').prop('checked', oai_settings.use_makersuite_sysprompt);
     $('#scale-alt').prop('checked', oai_settings.use_alt_scale);
     $('#openrouter_use_fallback').prop('checked', oai_settings.openrouter_use_fallback);
-    $('#openrouter_force_instruct').prop('checked', oai_settings.openrouter_force_instruct);
     $('#openrouter_group_models').prop('checked', oai_settings.openrouter_group_models);
     $('#openrouter_allow_fallbacks').prop('checked', oai_settings.openrouter_allow_fallbacks);
     $('#openrouter_providers_chat').val(oai_settings.openrouter_providers).trigger('change');
+    $('#openrouter_middleout').val(oai_settings.openrouter_middleout);
     $('#squash_system_messages').prop('checked', oai_settings.squash_system_messages);
     $('#continue_prefill').prop('checked', oai_settings.continue_prefill);
     $('#openai_function_calling').prop('checked', oai_settings.function_calling);
@@ -4990,6 +5016,7 @@ function loadOpenAISettings(data, settings) {
     $('#repetition_penalty_counter_openai').val(Number(oai_settings.repetition_penalty_openai));
     $('#seed_openai').val(oai_settings.seed);
     $('#n_openai').val(oai_settings.n);
+    $('#openai_show_thoughts').prop('checked', oai_settings.show_thoughts);
 
     if (settings.reverse_proxy !== undefined) oai_settings.reverse_proxy = settings.reverse_proxy;
     $('#openai_reverse_proxy').val(oai_settings.reverse_proxy);
@@ -4998,6 +5025,14 @@ function loadOpenAISettings(data, settings) {
 
     $('#openai_logit_bias_preset').empty();
     for (const preset of Object.keys(oai_settings.bias_presets)) {
+        // Backfill missing IDs
+        if (Array.isArray(oai_settings.bias_presets[preset])) {
+            oai_settings.bias_presets[preset].forEach((bias) => {
+                if (bias && !bias.id) {
+                    bias.id = uuidv4();
+                }
+            });
+        }
         const option = document.createElement('option');
         option.innerText = preset;
         option.value = preset;
@@ -5013,6 +5048,10 @@ function loadOpenAISettings(data, settings) {
 
     setNamesBehaviorControls();
     setContinuePostfixControls();
+
+    if (oai_settings.custom_prompt_post_processing === custom_prompt_post_processing_types.CLAUDE) {
+        oai_settings.custom_prompt_post_processing = custom_prompt_post_processing_types.MERGE;
+    }
 
     $('#chat_completion_source').val(oai_settings.chat_completion_source).trigger('change');
     $('#oai_max_context_unlocked').prop('checked', oai_settings.max_context_unlocked);
@@ -5091,7 +5130,7 @@ async function getStatusOpen() {
         chat_completion_sources.GROQ,
     ];
     if (noValidateSources.includes(oai_settings.chat_completion_source)) {
-        let status = 'Unable to verify key; press "Test Message" to validate.';
+        let status = t`Key saved; press \"Test Message\" to verify.`;
         setOnlineStatus(status);
         return resultCheckStatus();
     }
@@ -5102,7 +5141,7 @@ async function getStatusOpen() {
         chat_completion_source: oai_settings.chat_completion_source,
     };
 
-    if (oai_settings.reverse_proxy && (oai_settings.chat_completion_source === chat_completion_sources.OPENAI || oai_settings.chat_completion_source === chat_completion_sources.CLAUDE)) {
+    if (oai_settings.reverse_proxy && [chat_completion_sources.CLAUDE, chat_completion_sources.OPENAI, chat_completion_sources.MISTRALAI, chat_completion_sources.MAKERSUITE].includes(oai_settings.chat_completion_source)) {
         await validateReverseProxy();
     }
 
@@ -5150,7 +5189,7 @@ async function getStatusOpen() {
 }
 
 function showWindowExtensionError() {
-    toastr.error('Get it here: <a href="https://windowai.io/" target="_blank">windowai.io</a>', 'Extension is not installed', {
+    toastr.error(t`Get it here:` + ' <a href="https://windowai.io/" target="_blank">windowai.io</a>', t`Extension is not installed`, {
         escapeHtml: false,
         timeOut: 0,
         extendedTimeOut: 0,
@@ -5174,11 +5213,11 @@ async function saveOpenAIPreset(name, settings, triggerUi = true) {
         windowai_model: settings.windowai_model,
         openrouter_model: settings.openrouter_model,
         openrouter_use_fallback: settings.openrouter_use_fallback,
-        openrouter_force_instruct: settings.openrouter_force_instruct,
         openrouter_group_models: settings.openrouter_group_models,
         openrouter_sort_models: settings.openrouter_sort_models,
         openrouter_providers: settings.openrouter_providers,
         openrouter_allow_fallbacks: settings.openrouter_allow_fallbacks,
+        openrouter_middleout: settings.openrouter_middleout,
         ai21_model: settings.ai21_model,
         mistralai_model: settings.mistralai_model,
         cohere_model: settings.cohere_model,
@@ -5222,14 +5261,12 @@ async function saveOpenAIPreset(name, settings, triggerUi = true) {
         personality_format: settings.personality_format,
         group_nudge_prompt: settings.group_nudge_prompt,
         stream_openai: settings.stream_openai,
-        websearch_cohere: settings.websearch_cohere,
         prompts: settings.prompts,
         prompt_order: settings.prompt_order,
         api_url_scale: settings.api_url_scale,
         show_external_models: settings.show_external_models,
         assistant_prefill: settings.assistant_prefill,
         assistant_impersonation: settings.assistant_impersonation,
-        human_sysprompt_message: settings.human_sysprompt_message,
         claude_use_sysprompt: settings.claude_use_sysprompt,
         use_makersuite_sysprompt: settings.use_makersuite_sysprompt,
         use_alt_scale: settings.use_alt_scale,
@@ -5240,6 +5277,7 @@ async function saveOpenAIPreset(name, settings, triggerUi = true) {
         continue_prefill: settings.continue_prefill,
         continue_postfix: settings.continue_postfix,
         function_calling: settings.function_calling,
+        show_thoughts: settings.show_thoughts,
         seed: settings.seed,
         n: settings.n,
     };
@@ -5270,7 +5308,7 @@ async function saveOpenAIPreset(name, settings, triggerUi = true) {
             if (triggerUi) $('#settings_preset_openai').append(option).trigger('change');
         }
     } else {
-        toastr.error('Failed to save preset');
+        toastr.error(t`Failed to save preset`);
         throw new Error('Failed to save preset');
     }
 }
@@ -5285,7 +5323,8 @@ function onLogitBiasPresetChange() {
     }
 
     oai_settings.bias_preset_selected = value;
-    $('.openai_logit_bias_list').empty();
+    const list = $('.openai_logit_bias_list');
+    list.empty();
 
     for (const entry of preset) {
         if (entry) {
@@ -5293,12 +5332,33 @@ function onLogitBiasPresetChange() {
         }
     }
 
+    // Check if a sortable instance exists
+    if (list.sortable('instance') !== undefined) {
+        // Destroy the instance
+        list.sortable('destroy');
+    }
+
+    // Make the list sortable
+    list.sortable({
+        delay: getSortableDelay(),
+        handle: '.drag-handle',
+        stop: function () {
+            const order = [];
+            list.children().each(function () {
+                order.unshift($(this).data('id'));
+            });
+            preset.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+            console.log('Logit bias reordered:', preset);
+            saveSettingsDebounced();
+        },
+    });
+
     biasCache = undefined;
     saveSettingsDebounced();
 }
 
 function createNewLogitBiasEntry() {
-    const entry = { text: '', value: 0 };
+    const entry = { id: uuidv4(), text: '', value: 0 };
     oai_settings.bias_presets[oai_settings.bias_preset_selected].push(entry);
     biasCache = undefined;
     createLogitBiasListItem(entry);
@@ -5306,11 +5366,14 @@ function createNewLogitBiasEntry() {
 }
 
 function createLogitBiasListItem(entry) {
-    const id = oai_settings.bias_presets[oai_settings.bias_preset_selected].indexOf(entry);
+    if (!entry.id) {
+        entry.id = uuidv4();
+    }
+    const id = entry.id;
     const template = $('#openai_logit_bias_template .openai_logit_bias_form').clone();
     template.data('id', id);
     template.find('.openai_logit_bias_text').val(entry.text).on('input', function () {
-        oai_settings.bias_presets[oai_settings.bias_preset_selected][id].text = String($(this).val());
+        entry.text = String($(this).val());
         biasCache = undefined;
         saveSettingsDebounced();
     });
@@ -5329,13 +5392,17 @@ function createLogitBiasListItem(entry) {
             value = max;
         }
 
-        oai_settings.bias_presets[oai_settings.bias_preset_selected][id].value = value;
+        entry.value = value;
         biasCache = undefined;
         saveSettingsDebounced();
     });
     template.find('.openai_logit_bias_remove').on('click', function () {
         $(this).closest('.openai_logit_bias_form').remove();
-        oai_settings.bias_presets[oai_settings.bias_preset_selected].splice(id, 1);
+        const preset = oai_settings.bias_presets[oai_settings.bias_preset_selected];
+        const index = preset.findIndex(item => item.id === id);
+        if (index >= 0) {
+            preset.splice(index, 1);
+        }
         onLogitBiasPresetChange();
     });
     $('.openai_logit_bias_list').prepend(template);
@@ -5349,7 +5416,7 @@ async function createNewLogitBiasPreset() {
     }
 
     if (name in oai_settings.bias_presets) {
-        toastr.error('Preset name should be unique.');
+        toastr.error(t`Preset name should be unique.`);
         return;
     }
 
@@ -5393,7 +5460,7 @@ async function onPresetImportFileChange(e) {
     try {
         presetBody = JSON.parse(importedFile);
     } catch (err) {
-        toastr.error('Invalid file');
+        toastr.error(t`Invalid file`);
         return;
     }
 
@@ -5434,7 +5501,7 @@ async function onPresetImportFileChange(e) {
     });
 
     if (!savePresetSettings.ok) {
-        toastr.error('Failed to save preset');
+        toastr.error(t`Failed to save preset`);
         return;
     }
 
@@ -5459,7 +5526,7 @@ async function onPresetImportFileChange(e) {
 
 async function onExportPresetClick() {
     if (!oai_settings.preset_settings_openai) {
-        toastr.error('No preset selected');
+        toastr.error(t`No preset selected`);
         return;
     }
 
@@ -5467,8 +5534,8 @@ async function onExportPresetClick() {
 
     const fieldValues = sensitiveFields.filter(field => preset[field]).map(field => `<b>${field}</b>: <code>${preset[field]}</code>`);
     const shouldConfirm = fieldValues.length > 0;
-    const textHeader = 'Your preset contains proxy and/or custom endpoint settings.';
-    const textMessage = `<div>Do you want to remove these fields before exporting?</div><br>${DOMPurify.sanitize(fieldValues.join('<br>'))}`;
+    const textHeader = t`Your preset contains proxy and/or custom endpoint settings.`;
+    const textMessage = '<div>' + t`Do you want to remove these fields before exporting?` + `</div><br>${DOMPurify.sanitize(fieldValues.join('<br>'))}`;
     const cancelButton = { text: 'Cancel', result: POPUP_RESULT.CANCELLED, appendAtEnd: true };
     const popupOptions = { customButtons: [cancelButton] };
     const popupResult = await Popup.show.confirm(textHeader, textMessage, popupOptions);
@@ -5500,12 +5567,12 @@ async function onLogitBiasPresetImportFileChange(e) {
     e.target.value = '';
 
     if (name in oai_settings.bias_presets) {
-        toastr.error('Preset name should be unique.');
+        toastr.error(t`Preset name should be unique.`);
         return;
     }
 
     if (!Array.isArray(importedFile)) {
-        toastr.error('Invalid logit bias preset file.');
+        toastr.error(t`Invalid logit bias preset file.`);
         return;
     }
 
@@ -5515,6 +5582,9 @@ async function onLogitBiasPresetImportFileChange(e) {
         if (typeof entry == 'object' && entry !== null) {
             if (Object.hasOwn(entry, 'text') &&
                 Object.hasOwn(entry, 'value')) {
+                if (!entry.id) {
+                    entry.id = uuidv4();
+                }
                 validEntries.push(entry);
             }
         }
@@ -5538,7 +5608,7 @@ function onLogitBiasPresetExportClick() {
 }
 
 async function onDeletePresetClick() {
-    const confirm = await callPopup('Delete the preset? This action is irreversible and your current settings will be overwritten.', 'confirm');
+    const confirm = await callPopup(t`Delete the preset? This action is irreversible and your current settings will be overwritten.`, 'confirm');
 
     if (!confirm) {
         return;
@@ -5564,16 +5634,16 @@ async function onDeletePresetClick() {
     });
 
     if (!response.ok) {
-        toastr.warning('Preset was not deleted from server');
+        toastr.warning(t`Preset was not deleted from server`);
     } else {
-        toastr.success('Preset deleted');
+        toastr.success(t`Preset deleted`);
     }
 
     saveSettingsDebounced();
 }
 
 async function onLogitBiasPresetDeleteClick() {
-    const value = await callPopup('Delete the preset?', 'confirm');
+    const value = await callPopup(t`Delete the preset?`, 'confirm');
 
     if (!value) {
         return;
@@ -5611,16 +5681,18 @@ function onSettingsPresetChange() {
         windowai_model: ['#model_windowai_select', 'windowai_model', false],
         openrouter_model: ['#model_openrouter_select', 'openrouter_model', false],
         openrouter_use_fallback: ['#openrouter_use_fallback', 'openrouter_use_fallback', true],
-        openrouter_force_instruct: ['#openrouter_force_instruct', 'openrouter_force_instruct', true],
         openrouter_group_models: ['#openrouter_group_models', 'openrouter_group_models', false],
         openrouter_sort_models: ['#openrouter_sort_models', 'openrouter_sort_models', false],
         openrouter_providers: ['#openrouter_providers_chat', 'openrouter_providers', false],
         openrouter_allow_fallbacks: ['#openrouter_allow_fallbacks', 'openrouter_allow_fallbacks', true],
+        openrouter_middleout: ['#openrouter_middleout', 'openrouter_middleout', false],
         ai21_model: ['#model_ai21_select', 'ai21_model', false],
         mistralai_model: ['#model_mistralai_select', 'mistralai_model', false],
         cohere_model: ['#model_cohere_select', 'cohere_model', false],
         perplexity_model: ['#model_perplexity_select', 'perplexity_model', false],
         groq_model: ['#model_groq_select', 'groq_model', false],
+        nanogpt_model: ['#model_nanogpt_select', 'nanogpt_model', false],
+        deepseek_model: ['#model_deepseek_select', 'deepseek_model', false],
         zerooneai_model: ['#model_01ai_select', 'zerooneai_model', false],
         blockentropy_model: ['#model_blockentropy_select', 'blockentropy_model', false],
         custom_model: ['#custom_model_id', 'custom_model', false],
@@ -5647,7 +5719,6 @@ function onSettingsPresetChange() {
         personality_format: ['#personality_format_textarea', 'personality_format', false],
         group_nudge_prompt: ['#group_nudge_prompt_textarea', 'group_nudge_prompt', false],
         stream_openai: ['#stream_toggle', 'stream_openai', true],
-        websearch_cohere: ['#websearch_toggle', 'websearch_cohere', true],
         prompts: ['', 'prompts', false],
         prompt_order: ['', 'prompt_order', false],
         api_url_scale: ['#api_url_scale', 'api_url_scale', false],
@@ -5655,7 +5726,6 @@ function onSettingsPresetChange() {
         proxy_password: ['#openai_proxy_password', 'proxy_password', false],
         assistant_prefill: ['#claude_assistant_prefill', 'assistant_prefill', false],
         assistant_impersonation: ['#claude_assistant_impersonation', 'assistant_impersonation', false],
-        human_sysprompt_message: ['#claude_human_sysprompt_textarea', 'human_sysprompt_message', false],
         claude_use_sysprompt: ['#claude_use_sysprompt', 'claude_use_sysprompt', true],
         use_makersuite_sysprompt: ['#use_makersuite_sysprompt', 'use_makersuite_sysprompt', true],
         use_alt_scale: ['#use_alt_scale', 'use_alt_scale', true],
@@ -5665,6 +5735,7 @@ function onSettingsPresetChange() {
         continue_prefill: ['#continue_prefill', 'continue_prefill', true],
         continue_postfix: ['#continue_postfix', 'continue_postfix', false],
         function_calling: ['#openai_function_calling', 'function_calling', true],
+        show_thoughts: ['#openai_show_thoughts', 'show_thoughts', true],
         seed: ['#seed_openai', 'seed', false],
         n: ['#n_openai', 'n', false],
     };
@@ -5695,6 +5766,8 @@ function onSettingsPresetChange() {
         settings: oai_settings,
         savePreset: saveOpenAIPreset,
     }).finally(r => {
+        $('.model_custom_select').empty();
+
         for (const [key, [selector, setting, isCheckbox]] of Object.entries(settingsToUpdate)) {
             if (preset[key] !== undefined) {
                 if (isCheckbox) {
@@ -5871,6 +5944,26 @@ async function onModelChange() {
         oai_settings.groq_model = value;
     }
 
+    if ($(this).is('#model_nanogpt_select')) {
+        if (!value) {
+            console.debug('Null NanoGPT model selected. Ignoring.');
+            return;
+        }
+
+        console.log('NanoGPT model changed to', value);
+        oai_settings.nanogpt_model = value;
+    }
+
+    if ($(this).is('#model_deepseek_select')) {
+        if (!value) {
+            console.debug('Null DeepSeek model selected. Ignoring.');
+            return;
+        }
+
+        console.log('DeepSeek model changed to', value);
+        oai_settings.deepseek_model = value;
+    }
+
     if (value && $(this).is('#model_01ai_select')) {
         console.log('01.AI model changed to', value);
         oai_settings.zerooneai_model = value;
@@ -5902,17 +5995,14 @@ async function onModelChange() {
     if (oai_settings.chat_completion_source == chat_completion_sources.MAKERSUITE) {
         if (oai_settings.max_context_unlocked) {
             $('#openai_max_context').attr('max', max_2mil);
-        } else if (value.includes('gemini-1.5-pro')) {
+        } else if (value.includes('gemini-exp-1114') || value.includes('gemini-exp-1121') || value.includes('gemini-2.0-flash-thinking-exp-1219')) {
+            $('#openai_max_context').attr('max', max_32k);
+        } else if (value.includes('gemini-1.5-pro') || value.includes('gemini-exp-1206')) {
             $('#openai_max_context').attr('max', max_2mil);
-        } else if (value.includes('gemini-1.5-flash')) {
+        } else if (value.includes('gemini-1.5-flash') || value.includes('gemini-2.0-flash-exp')) {
             $('#openai_max_context').attr('max', max_1mil);
-        } else if (value.includes('gemini-1.0-pro-vision') || value === 'gemini-pro-vision') {
-            $('#openai_max_context').attr('max', max_16k);
         } else if (value.includes('gemini-1.0-pro') || value === 'gemini-pro') {
             $('#openai_max_context').attr('max', max_32k);
-        } else if (value === 'text-bison-001') {
-            $('#openai_max_context').attr('max', max_8k);
-        // The ultra endpoints are possibly dead:
         } else if (value.includes('gemini-1.0-ultra') || value === 'gemini-ultra') {
             $('#openai_max_context').attr('max', max_32k);
         } else {
@@ -6009,7 +6099,7 @@ async function onModelChange() {
             $('#openai_max_context').attr('max', unlocked_max);
         } else if (oai_settings.mistralai_model.includes('codestral-mamba')) {
             $('#openai_max_context').attr('max', max_256k);
-        } else if (['mistral-large-2407', 'mistral-large-latest'].includes(oai_settings.mistralai_model)) {
+        } else if (['mistral-large-2407', 'mistral-large-2411', 'mistral-large-latest'].includes(oai_settings.mistralai_model)) {
             $('#openai_max_context').attr('max', max_128k);
         } else if (oai_settings.mistralai_model.includes('mistral-nemo')) {
             $('#openai_max_context').attr('max', max_128k);
@@ -6017,6 +6107,8 @@ async function onModelChange() {
             $('#openai_max_context').attr('max', max_64k);
         } else if (oai_settings.mistralai_model.includes('pixtral')) {
             $('#openai_max_context').attr('max', max_128k);
+        } else if (oai_settings.mistralai_model.includes('ministral')) {
+            $('#openai_max_context').attr('max', max_32k);
         } else {
             $('#openai_max_context').attr('max', max_32k);
         }
@@ -6032,16 +6124,13 @@ async function onModelChange() {
         if (oai_settings.max_context_unlocked) {
             $('#openai_max_context').attr('max', unlocked_max);
         }
-        else if (['command-light', 'command'].includes(oai_settings.cohere_model)) {
+        else if (['command-light-nightly', 'command-light', 'command'].includes(oai_settings.cohere_model)) {
             $('#openai_max_context').attr('max', max_4k);
         }
-        else if (['command-light-nightly', 'command-nightly'].includes(oai_settings.cohere_model)) {
-            $('#openai_max_context').attr('max', max_8k);
-        }
-        else if (oai_settings.cohere_model.includes('command-r')) {
+        else if (oai_settings.cohere_model.includes('command-r') || ['c4ai-aya-23', 'c4ai-aya-expanse-32b', 'command-nightly'].includes(oai_settings.cohere_model)) {
             $('#openai_max_context').attr('max', max_128k);
         }
-        else if (['c4ai-aya-23'].includes(oai_settings.cohere_model)) {
+        else if (['c4ai-aya-23-8b', 'c4ai-aya-expanse-8b'].includes(oai_settings.cohere_model)) {
             $('#openai_max_context').attr('max', max_8k);
         }
         else {
@@ -6089,7 +6178,10 @@ async function onModelChange() {
         if (oai_settings.max_context_unlocked) {
             $('#openai_max_context').attr('max', unlocked_max);
         }
-        else if (oai_settings.groq_model.includes('llama-3.1')) {
+        else if (oai_settings.groq_model.includes('llama-3.2') && oai_settings.groq_model.includes('-preview')) {
+            $('#openai_max_context').attr('max', max_8k);
+        }
+        else if (oai_settings.groq_model.includes('llama-3.3') || oai_settings.groq_model.includes('llama-3.2') || oai_settings.groq_model.includes('llama-3.1')) {
             $('#openai_max_context').attr('max', max_128k);
         }
         else if (oai_settings.groq_model.includes('llama3-groq')) {
@@ -6176,6 +6268,34 @@ async function onModelChange() {
         $('#temp_openai').attr('max', oai_max_temp).val(oai_settings.temp_openai).trigger('input');
     }
 
+    if (oai_settings.chat_completion_source === chat_completion_sources.NANOGPT) {
+        if (oai_settings.max_context_unlocked) {
+            $('#openai_max_context').attr('max', unlocked_max);
+        } else {
+            $('#openai_max_context').attr('max', max_128k);
+        }
+
+        oai_settings.openai_max_context = Math.min(Number($('#openai_max_context').attr('max')), oai_settings.openai_max_context);
+        $('#openai_max_context').val(oai_settings.openai_max_context).trigger('input');
+        $('#temp_openai').attr('max', oai_max_temp).val(oai_settings.temp_openai).trigger('input');
+    }
+
+    if (oai_settings.chat_completion_source === chat_completion_sources.DEEPSEEK) {
+        if (oai_settings.max_context_unlocked) {
+            $('#openai_max_context').attr('max', unlocked_max);
+        } else if (oai_settings.deepseek_model == 'deepseek-chat') {
+            $('#openai_max_context').attr('max', max_64k);
+        } else if (oai_settings.deepseek_model == 'deepseek-coder') {
+            $('#openai_max_context').attr('max', max_16k);
+        } else {
+            $('#openai_max_context').attr('max', max_64k);
+        }
+
+        oai_settings.openai_max_context = Math.min(Number($('#openai_max_context').attr('max')), oai_settings.openai_max_context);
+        $('#openai_max_context').val(oai_settings.openai_max_context).trigger('input');
+        $('#temp_openai').attr('max', oai_max_temp).val(oai_settings.temp_openai).trigger('input');
+    }
+
     if (oai_settings.chat_completion_source === chat_completion_sources.COHERE) {
         oai_settings.pres_pen_openai = Math.min(Math.max(0, oai_settings.pres_pen_openai), 1);
         $('#pres_pen_openai').attr('max', 1).attr('min', 0).val(oai_settings.pres_pen_openai).trigger('input');
@@ -6198,8 +6318,8 @@ async function onOpenrouterModelSortChange() {
 
 async function onNewPresetClick() {
     const popupText = `
-        <h3>Preset name:</h3>
-        <h4>Hint: Use a character/group name to bind preset to a specific chat.</h4>`;
+        <h3>` + t`Preset name:` + `</h3>
+        <h4>` + t`Hint: Use a character/group name to bind preset to a specific chat.` + '</h4>';
     const name = await callPopup(popupText, 'input', oai_settings.preset_settings_openai);
 
     if (!name) {
@@ -6380,6 +6500,32 @@ async function onConnectButtonClick(e) {
         }
     }
 
+    if (oai_settings.chat_completion_source == chat_completion_sources.NANOGPT) {
+        const api_key_nanogpt = String($('#api_key_nanogpt').val()).trim();
+
+        if (api_key_nanogpt.length) {
+            await writeSecret(SECRET_KEYS.NANOGPT, api_key_nanogpt);
+        }
+
+        if (!secret_state[SECRET_KEYS.NANOGPT]) {
+            console.log('No secret key saved for NanoGPT');
+            return;
+        }
+    }
+
+    if (oai_settings.chat_completion_source == chat_completion_sources.DEEPSEEK) {
+        const api_key_deepseek = String($('#api_key_deepseek').val()).trim();
+
+        if (api_key_deepseek.length) {
+            await writeSecret(SECRET_KEYS.DEEPSEEK, api_key_deepseek);
+        }
+
+        if (!secret_state[SECRET_KEYS.DEEPSEEK]) {
+            console.log('No secret key saved for DeepSeek');
+            return;
+        }
+    }
+
     if (oai_settings.chat_completion_source == chat_completion_sources.ZEROONEAI) {
         const api_key_01ai = String($('#api_key_01ai').val()).trim();
 
@@ -6449,6 +6595,9 @@ function toggleChatCompletionForms() {
     else if (oai_settings.chat_completion_source == chat_completion_sources.GROQ) {
         $('#model_groq_select').trigger('change');
     }
+    else if (oai_settings.chat_completion_source == chat_completion_sources.NANOGPT) {
+        $('#model_nanogpt_select').trigger('change');
+    }
     else if (oai_settings.chat_completion_source == chat_completion_sources.ZEROONEAI) {
         $('#model_01ai_select').trigger('change');
     }
@@ -6458,14 +6607,13 @@ function toggleChatCompletionForms() {
     else if (oai_settings.chat_completion_source == chat_completion_sources.BLOCKENTROPY) {
         $('#model_blockentropy_select').trigger('change');
     }
+    else if (oai_settings.chat_completion_source == chat_completion_sources.DEEPSEEK) {
+        $('#model_deepseek_select').trigger('change');
+    }
     $('[data-source]').each(function () {
         const validSources = $(this).data('source').split(',');
         $(this).toggle(validSources.includes(oai_settings.chat_completion_source));
     });
-
-    if (chat_completion_sources.CLAUDE == oai_settings.chat_completion_source) {
-        $('#claude_human_sysprompt_message_block').toggle(oai_settings.claude_use_sysprompt);
-    }
 }
 
 async function testApiConnection() {
@@ -6547,18 +6695,26 @@ export function isImageInliningSupported() {
     // gultra just isn't being offered as multimodal, thanks google.
     const visionSupportedModels = [
         'gpt-4-vision',
+        'gemini-2.0-flash-thinking-exp-1219',
+        'gemini-2.0-flash-exp',
         'gemini-1.5-flash',
         'gemini-1.5-flash-latest',
         'gemini-1.5-flash-001',
+        'gemini-1.5-flash-002',
         'gemini-1.5-flash-exp-0827',
+        'gemini-1.5-flash-8b',
         'gemini-1.5-flash-8b-exp-0827',
+        'gemini-1.5-flash-8b-exp-0924',
+        'gemini-exp-1114',
+        'gemini-exp-1121',
+        'gemini-exp-1206',
         'gemini-1.0-pro-vision-latest',
         'gemini-1.5-pro',
         'gemini-1.5-pro-latest',
         'gemini-1.5-pro-001',
+        'gemini-1.5-pro-002',
         'gemini-1.5-pro-exp-0801',
         'gemini-1.5-pro-exp-0827',
-        'gemini-pro-vision',
         'claude-3',
         'claude-3-5',
         'gpt-4-turbo',
@@ -6567,7 +6723,11 @@ export function isImageInliningSupported() {
         'chatgpt-4o-latest',
         'yi-vision',
         'pixtral-latest',
+        'pixtral-12b-latest',
+        'pixtral-12b',
         'pixtral-12b-2409',
+        'pixtral-large-latest',
+        'pixtral-large-2411',
     ];
 
     switch (oai_settings.chat_completion_source) {
@@ -6578,7 +6738,7 @@ export function isImageInliningSupported() {
         case chat_completion_sources.CLAUDE:
             return visionSupportedModels.some(model => oai_settings.claude_model.includes(model));
         case chat_completion_sources.OPENROUTER:
-            return !oai_settings.openrouter_force_instruct;
+            return true;
         case chat_completion_sources.CUSTOM:
             return true;
         case chat_completion_sources.ZEROONEAI:
@@ -6704,7 +6864,7 @@ function runProxyCallback(_, value) {
     const result = fuse.search(value);
 
     if (result.length === 0) {
-        toastr.warning(`Proxy preset "${value}" not found`);
+        toastr.warning(t`Proxy preset '${value}' not found`);
         return '';
     }
 
@@ -6713,7 +6873,7 @@ function runProxyCallback(_, value) {
     return foundName;
 }
 
-export function initOpenai() {
+export function initOpenAI() {
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'proxy',
         callback: runProxyCallback,
@@ -6729,9 +6889,7 @@ export function initOpenai() {
         ],
         helpString: 'Sets a proxy preset by name.',
     }));
-}
 
-$(document).ready(async function () {
     $('#test_api_button').on('click', testApiConnection);
 
     $('#scale-alt').on('change', function () {
@@ -6806,11 +6964,6 @@ $(document).ready(async function () {
         saveSettingsDebounced();
     });
 
-    $('#websearch_toggle').on('change', function () {
-        oai_settings.websearch_cohere = !!$('#websearch_toggle').prop('checked');
-        saveSettingsDebounced();
-    });
-
     $('#wrap_in_quotes').on('change', function () {
         oai_settings.wrap_in_quotes = !!$('#wrap_in_quotes').prop('checked');
         saveSettingsDebounced();
@@ -6818,7 +6971,6 @@ $(document).ready(async function () {
 
     $('#claude_use_sysprompt').on('change', function () {
         oai_settings.claude_use_sysprompt = !!$('#claude_use_sysprompt').prop('checked');
-        $('#claude_human_sysprompt_message_block').toggle(oai_settings.claude_use_sysprompt);
         saveSettingsDebounced();
     });
 
@@ -6880,7 +7032,7 @@ $(document).ready(async function () {
     $('#update_oai_preset').on('click', async function () {
         const name = oai_settings.preset_settings_openai;
         await saveOpenAIPreset(name, oai_settings);
-        toastr.success('Preset updated');
+        toastr.success(t`Preset updated`);
     });
 
     $('#impersonation_prompt_restore').on('click', function () {
@@ -6892,12 +7044,6 @@ $(document).ready(async function () {
     $('#newchat_prompt_restore').on('click', function () {
         oai_settings.new_chat_prompt = default_new_chat_prompt;
         $('#newchat_prompt_textarea').val(oai_settings.new_chat_prompt);
-        saveSettingsDebounced();
-    });
-
-    $('#claude_human_sysprompt_message_restore').on('click', function () {
-        oai_settings.human_sysprompt_message = default_claude_human_sysprompt_message;
-        $('#claude_human_sysprompt_textarea').val(oai_settings.human_sysprompt_message);
         saveSettingsDebounced();
     });
 
@@ -6992,18 +7138,8 @@ $(document).ready(async function () {
         saveSettingsDebounced();
     });
 
-    $('#claude_human_sysprompt_textarea').on('input', function () {
-        oai_settings.human_sysprompt_message = String($('#claude_human_sysprompt_textarea').val());
-        saveSettingsDebounced();
-    });
-
     $('#openrouter_use_fallback').on('input', function () {
         oai_settings.openrouter_use_fallback = !!$(this).prop('checked');
-        saveSettingsDebounced();
-    });
-
-    $('#openrouter_force_instruct').on('input', function () {
-        oai_settings.openrouter_force_instruct = !!$(this).prop('checked');
         saveSettingsDebounced();
     });
 
@@ -7019,6 +7155,11 @@ $(document).ready(async function () {
 
     $('#openrouter_allow_fallbacks').on('input', function () {
         oai_settings.openrouter_allow_fallbacks = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
+    $('#openrouter_middleout').on('input', function () {
+        oai_settings.openrouter_middleout = String($(this).val());
         saveSettingsDebounced();
     });
 
@@ -7132,6 +7273,11 @@ $(document).ready(async function () {
         saveSettingsDebounced();
     });
 
+    $('#openai_show_thoughts').on('input', function () {
+        oai_settings.show_thoughts = !!$(this).prop('checked');
+        saveSettingsDebounced();
+    });
+
     if (!CSS.supports('field-sizing', 'content')) {
         $(document).on('input', '#openai_settings .autoSetHeight', function () {
             resetScrollHeight($(this));
@@ -7140,8 +7286,8 @@ $(document).ready(async function () {
 
     if (!isMobile()) {
         $('#model_openrouter_select').select2({
-            placeholder: 'Select a model',
-            searchInputPlaceholder: 'Search models...',
+            placeholder: t`Select a model`,
+            searchInputPlaceholder: t`Search models...`,
             searchInputCssClass: 'text_pole',
             width: '100%',
             templateResult: getOpenRouterModelTemplate,
@@ -7176,6 +7322,8 @@ $(document).ready(async function () {
     $('#model_cohere_select').on('change', onModelChange);
     $('#model_perplexity_select').on('change', onModelChange);
     $('#model_groq_select').on('change', onModelChange);
+    $('#model_nanogpt_select').on('change', onModelChange);
+    $('#model_deepseek_select').on('change', onModelChange);
     $('#model_01ai_select').on('change', onModelChange);
     $('#model_blockentropy_select').on('change', onModelChange);
     $('#model_custom_select').on('change', onModelChange);
@@ -7195,4 +7343,4 @@ $(document).ready(async function () {
     $('#openai_proxy_password_show').on('click', onProxyPasswordShowClick);
     $('#customize_additional_parameters').on('click', onCustomizeParametersClick);
     $('#openai_proxy_preset').on('change', onProxyPresetChange);
-});
+}

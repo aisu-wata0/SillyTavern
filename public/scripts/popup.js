@@ -1,3 +1,4 @@
+import dialogPolyfill from '../lib/dialog-polyfill.esm.js';
 import { shouldSendOnEnter } from './RossAscends-mods.js';
 import { power_user } from './power-user.js';
 import { removeFromArray, runAfterAnimation, uuidv4 } from './utils.js';
@@ -74,7 +75,7 @@ const showPopupHelper = {
      * Asynchronously displays an input popup with the given header and text, and returns the user's input.
      *
      * @param {string?} header - The header text for the popup.
-     * @param {string?} text - The main text for the popup.
+     * @param {string?} [text] - The main text for the popup.
      * @param {string} [defaultValue=''] - The default value for the input field.
      * @param {PopupOptions} [popupOptions={}] - Options for the popup.
      * @return {Promise<string?>} A Promise that resolves with the user's input.
@@ -93,7 +94,7 @@ const showPopupHelper = {
      * Asynchronously displays a confirmation popup with the given header and text, returning the clicked result button value.
      *
      * @param {string?} header - The header text for the popup.
-     * @param {string?} text - The main text for the popup.
+     * @param {string?} [text] - The main text for the popup.
      * @param {PopupOptions} [popupOptions={}] - Options for the popup.
      * @return {Promise<POPUP_RESULT?>} A Promise that resolves with the result of the user's interaction.
      */
@@ -178,6 +179,18 @@ export class Popup {
         const template = document.querySelector('#popup_template');
         // @ts-ignore
         this.dlg = template.content.cloneNode(true).querySelector('.popup');
+        if (!this.dlg.showModal) {
+            this.dlg.classList.add('poly_dialog');
+            dialogPolyfill.registerDialog(this.dlg);
+            // Force a vertical reposition after the content
+            // (like crop image) has been set
+            const resizeObserver = new ResizeObserver((entries) => {
+                for (const entry of entries) {
+                    dialogPolyfill.reposition(entry.target);
+                }
+            });
+            resizeObserver.observe(this.dlg);
+        }
         this.body = this.dlg.querySelector('.popup-body');
         this.content = this.dlg.querySelector('.popup-content');
         this.mainInput = this.dlg.querySelector('.popup-input');

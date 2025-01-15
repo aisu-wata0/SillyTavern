@@ -1,17 +1,20 @@
+import { Fuse } from '../../../lib.js';
+
 import { callPopup, eventSource, event_types, generateRaw, getRequestHeaders, main_api, online_status, saveSettingsDebounced, substituteParams, substituteParamsExtended, system_message_types } from '../../../script.js';
 import { dragElement, isMobile } from '../../RossAscends-mods.js';
 import { getContext, getApiUrl, modules, extension_settings, ModuleWorkerWrapper, doExtrasFetch, renderExtensionTemplateAsync } from '../../extensions.js';
 import { loadMovingUIState, power_user } from '../../power-user.js';
-import { onlyUnique, debounce, getCharaFilename, trimToEndSentence, trimToStartSentence, waitUntilCondition } from '../../utils.js';
+import { onlyUnique, debounce, getCharaFilename, trimToEndSentence, trimToStartSentence, waitUntilCondition, findChar } from '../../utils.js';
 import { hideMutedSprites } from '../../group-chats.js';
 import { isJsonSchemaSupported } from '../../textgen-settings.js';
 import { debounce_timeout } from '../../constants.js';
 import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from '../../slash-commands/SlashCommandArgument.js';
-import { isFunctionCallingSupported } from '../../openai.js';
 import { SlashCommandEnumValue, enumTypes } from '../../slash-commands/SlashCommandEnumValue.js';
 import { commonEnumProviders } from '../../slash-commands/SlashCommandCommonEnumsProvider.js';
+import { slashCommandReturnHelper } from '../../slash-commands/SlashCommandReturnHelper.js';
+import { generateWebLlmChatPrompt, isWebLlmSupported } from '../shared.js';
 export { MODULE_NAME };
 
 const MODULE_NAME = 'expressions';
@@ -19,8 +22,7 @@ const UPDATE_INTERVAL = 2000;
 const STREAMING_UPDATE_INTERVAL = 10000;
 const TALKINGCHECK_UPDATE_INTERVAL = 500;
 const DEFAULT_FALLBACK_EXPRESSION = 'joy';
-const FUNCTION_NAME = 'set_emotion';
-const DEFAULT_LLM_PROMPT = 'Pause your roleplay. Classify the emotion of the last message. Output just one word, e.g. "joy" or "anger". Choose only one of the following labels: {{labels}}';
+const DEFAULT_LLM_PROMPT = 'Ignore previous instructions. Classify the emotion of the last message. Output just one word, e.g. "joy" or "anger". Choose only one of the following labels: {{labels}}';
 const DEFAULT_EXPRESSIONS = [
     'talkinghead',
     'admiration',
@@ -57,6 +59,7 @@ const EXPRESSION_API = {
     local: 0,
     extras: 1,
     llm: 2,
+    webllm: 3,
 };
 
 let expressionsList = null;
@@ -695,6 +698,11 @@ async function moduleWorker() {
         return;
     }
 
+    // If using LLM api then check if streamingProcessor is finished to avoid sending multiple requests to the API
+    if (extension_settings.expressions.api === EXPRESSION_API.llm && context.streamingProcessor && !context.streamingProcessor.isFinished) {
+        return;
+    }
+
     // API is busy
     if (inApiCall) {
         console.debug('Classification API is busy');
@@ -845,7 +853,7 @@ function setTalkingHeadState(newState) {
     extension_settings.expressions.talkinghead = newState; // Store setting
     saveSettingsDebounced();
 
-    if (extension_settings.expressions.api == EXPRESSION_API.local || extension_settings.expressions.api == EXPRESSION_API.llm) {
+    if ([EXPRESSION_API.local, EXPRESSION_API.llm, EXPRESSION_API.webllm].includes(extension_settings.expressions.api)) {
         return;
     }
 
@@ -978,6 +986,71 @@ async function setSpriteSlashCommand(_, spriteId) {
 }
 
 /**
+ * Returns the sprite folder name (including override) for a character.
+ * @param {object} char Character object
+ * @param {string} char.avatar Avatar filename with extension
+ * @returns {string} Sprite folder name
+ * @throws {Error} If character not found or avatar not set
+ */
+function spriteFolderNameFromCharacter(char) {
+    const avatarFileName = char.avatar.replace(/\.[^/.]+$/, '');
+    const expressionOverride = extension_settings.expressionOverrides.find(e => e.name === avatarFileName);
+    return expressionOverride?.path ? expressionOverride.path : avatarFileName;
+}
+
+/**
+ * Slash command callback for /uploadsprite
+ *
+ * label= is required
+ * if name= is provided, it will be used as a findChar lookup
+ * if name= is not provided, the last character's name will be used
+ * if folder= is a full path, it will be used as the folder
+ * if folder= is a partial path, it will be appended to the character's name
+ * if folder= is not provided, the character's override folder will be used, if set
+ *
+ * @param {object} args
+ * @param {string} args.name Character name or avatar key, passed through findChar
+ * @param {string} args.label Expression label
+ * @param {string} args.folder Sprite folder path, processed using backslash rules
+ * @param {string} imageUrl Image URI to fetch and upload
+ * @returns {Promise<void>}
+ */
+async function uploadSpriteCommand({ name, label, folder }, imageUrl) {
+    if (!imageUrl) throw new Error('Image URL is required');
+    if (!label || typeof label !== 'string') throw new Error('Expression label is required');
+
+    label = label.replace(/[^a-z]/gi, '').toLowerCase().trim();
+    if (!label) throw new Error('Expression label must contain at least one letter');
+
+    name = name || getLastCharacterMessage().original_avatar || getLastCharacterMessage().name;
+    const char = findChar({ name });
+
+    if (!folder) {
+        folder = spriteFolderNameFromCharacter(char);
+    } else if (folder.startsWith('/') || folder.startsWith('\\')) {
+        const subfolder = folder.slice(1);
+        folder = `${char.name}/${subfolder}`;
+    }
+
+    try {
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+        const file = new File([blob], 'image.png', { type: 'image/png' });
+
+        const formData = new FormData();
+        formData.append('name', folder); // this is the folder or character name
+        formData.append('label', label); // this is the expression label
+        formData.append('avatar', file);  // this is the image file
+
+        await handleFileUpload('/api/sprites/upload', formData);
+        console.debug(`[${MODULE_NAME}] Upload of ${imageUrl} completed for ${name} with label ${label}`);
+    } catch (error) {
+        console.error(`[${MODULE_NAME}] Error uploading file:`, error);
+        throw error;
+    }
+}
+
+/**
  * Processes the classification text to reduce the amount of text sent to the API.
  * Quotes and asterisks are to be removed. If the text is less than 300 characters, it is returned as is.
  * If the text is more than 300 characters, the first and last 150 characters are returned.
@@ -992,6 +1065,11 @@ function sampleClassifyText(text) {
 
     // Replace macros, remove asterisks and quotes
     let result = substituteParams(text).replace(/[*"]/g, '');
+
+    // If using LLM api there is no need to check length of characters
+    if (extension_settings.expressions.api === EXPRESSION_API.llm) {
+        return result.trim();
+    }
 
     const SAMPLE_THRESHOLD = 500;
     const HALF_SAMPLE_THRESHOLD = SAMPLE_THRESHOLD / 2;
@@ -1012,10 +1090,6 @@ function sampleClassifyText(text) {
  */
 async function getLlmPrompt(labels) {
     if (isJsonSchemaSupported()) {
-        return '';
-    }
-
-    if (isFunctionCallingSupported()) {
         return '';
     }
 
@@ -1049,44 +1123,37 @@ function parseLlmResponse(emotionResponse, labels) {
             console.debug(`fuzzy search found: ${result[0].item} as closest for the LLM response:`, emotionResponse);
             return result[0].item;
         }
+        const lowerCaseResponse = String(emotionResponse || '').toLowerCase();
+        for (const label of labels) {
+            if (lowerCaseResponse.includes(label.toLowerCase())) {
+                console.debug(`Found label ${label} in the LLM response:`, emotionResponse);
+                return label;
+            }
+        }
     }
 
     throw new Error('Could not parse emotion response ' + emotionResponse);
 }
 
 /**
- * Registers the function tool for the LLM API.
- * @param {FunctionToolRegister} args Function tool register arguments.
+ * Gets the JSON schema for the LLM API.
+ * @param {string[]} emotions A list of emotions to search for.
+ * @returns {object} The JSON schema for the LLM API.
  */
-function onFunctionToolRegister(args) {
-    if (inApiCall && extension_settings.expressions.api === EXPRESSION_API.llm && isFunctionCallingSupported()) {
-        // Only trigger on quiet mode
-        if (args.type !== 'quiet') {
-            return;
-        }
-
-        const emotions = DEFAULT_EXPRESSIONS.filter((e) => e != 'talkinghead');
-        const jsonSchema = {
-            $schema: 'http://json-schema.org/draft-04/schema#',
-            type: 'object',
-            properties: {
-                emotion: {
-                    type: 'string',
-                    enum: emotions,
-                    description: `One of the following: ${JSON.stringify(emotions)}`,
-                },
+function getJsonSchema(emotions) {
+    return {
+        $schema: 'http://json-schema.org/draft-04/schema#',
+        type: 'object',
+        properties: {
+            emotion: {
+                type: 'string',
+                enum: emotions,
             },
-            required: [
-                'emotion',
-            ],
-        };
-        args.registerFunctionTool(
-            FUNCTION_NAME,
-            substituteParams('Sets the label that best describes the current emotional state of {{char}}. Only select one of the enumerated values.'),
-            jsonSchema,
-            true,
-        );
-    }
+        },
+        required: [
+            'emotion',
+        ],
+    };
 }
 
 function onTextGenSettingsReady(args) {
@@ -1098,19 +1165,7 @@ function onTextGenSettingsReady(args) {
             stop: [],
             stopping_strings: [],
             custom_token_bans: [],
-            json_schema: {
-                $schema: 'http://json-schema.org/draft-04/schema#',
-                type: 'object',
-                properties: {
-                    emotion: {
-                        type: 'string',
-                        enum: emotions,
-                    },
-                },
-                required: [
-                    'emotion',
-                ],
-            },
+            json_schema: getJsonSchema(emotions),
         });
     }
 }
@@ -1161,19 +1216,26 @@ export async function getExpressionLabel(text, expressionsApi = extension_settin
                 }
 
                 const expressionsList = await getExpressionsList();
-                const prompt = substituteParamsExtended(String(customPrompt), { labels: expressionsList }) || await getLlmPrompt(expressionsList);
-                let functionResult = null;
+                const prompt = substituteParamsExtended(customPrompt, { labels: expressionsList }) || await getLlmPrompt(expressionsList);
                 eventSource.once(event_types.TEXT_COMPLETION_SETTINGS_READY, onTextGenSettingsReady);
-                eventSource.once(event_types.LLM_FUNCTION_TOOL_REGISTER, onFunctionToolRegister);
-                eventSource.once(event_types.LLM_FUNCTION_TOOL_CALL, (/** @type {FunctionToolCall} */ args) => {
-                    if (args.name !== FUNCTION_NAME) {
-                        return;
-                    }
-
-                    functionResult = args?.arguments;
-                });
                 const emotionResponse = await generateRaw(text, main_api, false, false, prompt);
-                return parseLlmResponse(functionResult || emotionResponse, expressionsList);
+                return parseLlmResponse(emotionResponse, expressionsList);
+            }
+            // Using WebLLM
+            case EXPRESSION_API.webllm: {
+                if (!isWebLlmSupported()) {
+                    console.warn('WebLLM is not supported. Using fallback expression');
+                    return getFallbackExpression();
+                }
+
+                const expressionsList = await getExpressionsList();
+                const prompt = substituteParamsExtended(customPrompt, { labels: expressionsList }) || await getLlmPrompt(expressionsList);
+                const messages = [
+                    { role: 'user', content: text + '\n\n' + prompt },
+                ];
+
+                const emotionResponse = await generateWebLlmChatPrompt(messages);
+                return parseLlmResponse(emotionResponse, expressionsList);
             }
             // Extras
             default: {
@@ -1285,8 +1347,6 @@ async function drawSpritesList(character, labels, sprites) {
  * @returns {Promise<string>} Rendered list item template
  */
 async function getListItem(item, imageSrc, textClass, isCustom) {
-    const isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
-    imageSrc = isFirefox ? `${imageSrc}?t=${Date.now()}` : imageSrc;
     return renderExtensionTemplateAsync(MODULE_NAME, 'list-item', { item, imageSrc, textClass, isCustom });
 }
 
@@ -1639,7 +1699,7 @@ function onExpressionApiChanged() {
     const tempApi = this.value;
     if (tempApi) {
         extension_settings.expressions.api = Number(tempApi);
-        $('.expression_llm_prompt_block').toggle(extension_settings.expressions.api === EXPRESSION_API.llm);
+        $('.expression_llm_prompt_block').toggle([EXPRESSION_API.llm, EXPRESSION_API.webllm].includes(extension_settings.expressions.api));
         expressionsList = null;
         spriteCache = {};
         moduleWorker();
@@ -1976,7 +2036,7 @@ function migrateSettings() {
 
         await renderAdditionalExpressionSettings();
         $('#expression_api').val(extension_settings.expressions.api ?? EXPRESSION_API.extras);
-        $('.expression_llm_prompt_block').toggle(extension_settings.expressions.api === EXPRESSION_API.llm);
+        $('.expression_llm_prompt_block').toggle([EXPRESSION_API.llm, EXPRESSION_API.webllm].includes(extension_settings.expressions.api));
         $('#expression_llm_prompt').val(extension_settings.expressions.llmPrompt ?? '');
         $('#expression_llm_prompt').on('input', function () {
             extension_settings.expressions.llmPrompt = $(this).val();
@@ -2105,14 +2165,20 @@ function migrateSettings() {
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'lastsprite',
-        callback: (_, value) => lastExpression[String(value).trim()] ?? '',
+        callback: (_, name) => {
+            if (typeof name !== 'string') throw new Error('name must be a string');
+            const char = findChar({ name: name });
+            const sprite = lastExpression[char?.name ?? name] ?? '';
+            return sprite;
+        },
         returns: 'the last set sprite / expression for the named character.',
         unnamedArgumentList: [
             SlashCommandArgument.fromProps({
-                description: 'character name',
+                description: 'Character name - or unique character identifier (avatar key)',
                 typeList: [ARGUMENT_TYPE.STRING],
                 isRequired: true,
                 enumProvider: commonEnumProviders.characters('character'),
+                forceEnum: true,
             }),
         ],
         helpString: 'Returns the last set sprite / expression for the named character.',
@@ -2128,18 +2194,42 @@ function migrateSettings() {
         name: 'classify-expressions',
         aliases: ['expressions'],
         callback: async (args) => {
-            const list = await getExpressionsList();
-            switch (String(args.format).toLowerCase()) {
-                case 'json':
-                    return JSON.stringify(list);
-                default:
-                    return list.join(', ');
+            /** @type {import('../../slash-commands/SlashCommandReturnHelper.js').SlashCommandReturnType} */
+            // @ts-ignore
+            let returnType = args.return;
+
+            // Old legacy return type handling
+            if (args.format) {
+                toastr.warning(`Legacy argument 'format' with value '${args.format}' is deprecated. Please use 'return' instead. Routing to the correct return type...`, 'Deprecation warning');
+                const type = String(args?.format).toLowerCase().trim();
+                switch (type) {
+                    case 'json':
+                        returnType = 'object';
+                        break;
+                    default:
+                        returnType = 'pipe';
+                        break;
+                }
             }
+
+            // Now the actual new return type handling
+            const list = await getExpressionsList();
+
+            return await slashCommandReturnHelper.doReturn(returnType ?? 'pipe', list, { objectToStringFunc: list => list.join(', ') });
         },
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({
+                name: 'return',
+                description: 'The way how you want the return value to be provided',
+                typeList: [ARGUMENT_TYPE.STRING],
+                defaultValue: 'pipe',
+                enumList: slashCommandReturnHelper.enumList({ allowObject: true }),
+                forceEnum: true,
+            }),
+            // TODO remove some day
+            SlashCommandNamedArgument.fromProps({
                 name: 'format',
-                description: 'The format to return the list in: comma-separated plain text or JSON array. Default is plain text.',
+                description: '!!! DEPRECATED - use "return" instead !!! The format to return the list in: comma-separated plain text or JSON array. Default is plain text.',
                 typeList: [ARGUMENT_TYPE.STRING],
                 enumList: [
                     new SlashCommandEnumValue('plain', null, enumTypes.enum, ', '),
@@ -2188,5 +2278,44 @@ function migrateSettings() {
                 </ul>
             </div>
         `,
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'uploadsprite',
+        callback: async (args, url) => {
+            await uploadSpriteCommand(args, url);
+            return '';
+        },
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'URL of the image to upload',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: true,
+            }),
+        ],
+        namedArgumentList: [
+            SlashCommandNamedArgument.fromProps({
+                name: 'name',
+                description: 'Character name or avatar key (default is current character)',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: false,
+                acceptsMultiple: false,
+            }),
+            SlashCommandNamedArgument.fromProps({
+                name: 'label',
+                description: 'Sprite label/expression name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                enumProvider: localEnumProviders.expressions,
+                isRequired: true,
+                acceptsMultiple: false,
+            }),
+            SlashCommandNamedArgument.fromProps({
+                name: 'folder',
+                description: 'Override folder to upload into',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: false,
+                acceptsMultiple: false,
+            }),
+        ],
+        helpString: '<div>Upload a sprite from a URL.</div><div>Example:</div><pre><code>/uploadsprite name=Seraphina label=joy /user/images/Seraphina/Seraphina_2024-12-22@12h37m57s.png</code></pre>',
     }));
 })();

@@ -1,28 +1,33 @@
-const path = require('path');
-const fs = require('fs');
-const fsPromises = require('fs').promises;
-const readline = require('readline');
-const express = require('express');
-const sanitize = require('sanitize-filename');
-const writeFileAtomicSync = require('write-file-atomic').sync;
-const yaml = require('yaml');
-const _ = require('lodash');
-const mime = require('mime-types');
+import path from 'node:path';
+import fs from 'node:fs';
+import { promises as fsPromises } from 'node:fs';
+import readline from 'node:readline';
+import { Buffer } from 'node:buffer';
 
-const jimp = require('jimp');
+import express from 'express';
+import sanitize from 'sanitize-filename';
+import { sync as writeFileAtomicSync } from 'write-file-atomic';
+import yaml from 'yaml';
+import _ from 'lodash';
+import mime from 'mime-types';
+import jimp from 'jimp';
 
-const { AVATAR_WIDTH, AVATAR_HEIGHT } = require('../constants');
-const { jsonParser, urlencodedParser } = require('../express-common');
-const { deepMerge, humanizedISO8601DateTime, tryParse, extractFileFromZipBuffer } = require('../util');
-const { TavernCardValidator } = require('../validator/TavernCardValidator');
-const characterCardParser = require('../character-card-parser.js');
-const { readWorldInfoFile } = require('./worldinfo');
-const { invalidateThumbnail } = require('./thumbnails');
-const { importRisuSprites } = require('./sprites');
+import { AVATAR_WIDTH, AVATAR_HEIGHT } from '../constants.js';
+import { jsonParser, urlencodedParser } from '../express-common.js';
+import { deepMerge, humanizedISO8601DateTime, tryParse, extractFileFromZipBuffer, MemoryLimitedMap, getConfigValue } from '../util.js';
+import { TavernCardValidator } from '../validator/TavernCardValidator.js';
+import { parse, write } from '../character-card-parser.js';
+import { readWorldInfoFile } from './worldinfo.js';
+import { invalidateThumbnail } from './thumbnails.js';
+import { importRisuSprites } from './sprites.js';
 const defaultAvatarPath = './public/img/ai4.png';
 
 // KV-store for parsed character data
-const characterDataCache = new Map();
+const cacheCapacity = Number(getConfigValue('cardsCacheCapacity', 100)); // MB
+// With 100 MB limit it would take roughly 3000 characters to reach this limit
+const characterDataCache = new MemoryLimitedMap(1024 * 1024 * cacheCapacity);
+// Some Android devices require tighter memory management
+const isAndroid = process.platform === 'android';
 
 /**
  * Reads the character card from the specified image file.
@@ -37,8 +42,8 @@ async function readCharacterData(inputFile, inputFormat = 'png') {
         return characterDataCache.get(cacheKey);
     }
 
-    const result = characterCardParser.parse(inputFile, inputFormat);
-    characterDataCache.set(cacheKey, result);
+    const result = parse(inputFile, inputFormat);
+    !isAndroid && characterDataCache.set(cacheKey, result);
     return result;
 }
 
@@ -55,6 +60,9 @@ async function writeCharacterData(inputFile, data, outputFile, request, crop = u
     try {
         // Reset the cache
         for (const key of characterDataCache.keys()) {
+            if (Buffer.isBuffer(inputFile)) {
+                break;
+            }
             if (key.startsWith(inputFile)) {
                 characterDataCache.delete(key);
                 break;
@@ -76,7 +84,7 @@ async function writeCharacterData(inputFile, data, outputFile, request, crop = u
         const inputImage = await getInputImage();
 
         // Get the chunks
-        const outputImage = characterCardParser.write(inputImage, data);
+        const outputImage = write(inputImage, data);
         const outputImagePath = path.join(request.user.directories.characters, `${outputFile}.png`);
 
         writeFileAtomicSync(outputImagePath, outputImage);
@@ -150,7 +158,8 @@ async function tryReadImage(imgPath, crop) {
         return image;
     }
     // If it's an unsupported type of image (APNG) - just read the file as buffer
-    catch {
+    catch (error) {
+        console.log(`Failed to read image: ${imgPath}`, error);
         return fs.readFileSync(imgPath);
     }
 }
@@ -188,7 +197,7 @@ const calculateDataSize = (data) => {
  * processCharacter - Process a given character, read its data and calculate its statistics.
  *
  * @param  {string} item The name of the character.
- * @param  {import('../users').UserDirectoryList} directories User directories
+ * @param  {import('../users.js').UserDirectoryList} directories User directories
  * @return {Promise<object>}     A Promise that resolves when the character processing is done.
  */
 const processCharacter = async (item, directories) => {
@@ -232,7 +241,7 @@ const processCharacter = async (item, directories) => {
 /**
  * Convert a character object to Spec V2 format.
  * @param {object} jsonObject Character object
- * @param {import('../users').UserDirectoryList} directories User directories
+ * @param {import('../users.js').UserDirectoryList} directories User directories
  * @param {boolean} hoistDate Will set the chat and create_date fields to the current date if they are missing
  * @returns {object} Character object in Spec V2 format
  */
@@ -252,7 +261,7 @@ function getCharaCardV2(jsonObject, directories, hoistDate = true) {
 /**
  * Convert a character object to Spec V2 format.
  * @param {object} char Character object
- * @param {import('../users').UserDirectoryList} directories User directories
+ * @param {import('../users.js').UserDirectoryList} directories User directories
  * @returns {object} Character object in Spec V2 format
  */
 function convertToV2(char, directories) {
@@ -342,7 +351,7 @@ function readFromV2(char) {
 /**
  * Format character data to Spec V2 format.
  * @param {object} data Character data
- * @param {import('../users').UserDirectoryList} directories User directories
+ * @param {import('../users.js').UserDirectoryList} directories User directories
  * @returns
  */
 function charaFormatData(data, directories) {
@@ -467,6 +476,7 @@ function convertWorldInfoToCharacterBook(name, entries) {
             position: entry.position == 0 ? 'before_char' : 'after_char',
             use_regex: true, // ST keys are always regex
             extensions: {
+                ...entry.extensions,
                 position: entry.position,
                 exclude_recursion: entry.excludeRecursion,
                 display_index: entry.displayIndex,
@@ -540,7 +550,7 @@ async function importFromYaml(uploadPath, context, preservedFileName) {
  * @returns {Promise<string>} Internal name of the character
  */
 async function importFromCharX(uploadPath, { request }, preservedFileName) {
-    const data = fs.readFileSync(uploadPath);
+    const data = fs.readFileSync(uploadPath).buffer;
     fs.rmSync(uploadPath);
     console.log('Importing from CharX');
     const cardBuffer = await extractFileFromZipBuffer(data, 'card.json');
@@ -715,7 +725,7 @@ async function importFromPng(uploadPath, { request }, preservedFileName) {
     return '';
 }
 
-const router = express.Router();
+export const router = express.Router();
 
 router.post('/create', urlencodedParser, async function (request, response) {
     try {
@@ -1008,6 +1018,11 @@ router.post('/chats', jsonParser, async function (request, response) {
 
     try {
         const chatsDirectory = path.join(request.user.directories.chats, characterDirectory);
+
+        if (!fs.existsSync(chatsDirectory)) {
+            return response.send({ error: true });
+        }
+
         const files = fs.readdirSync(chatsDirectory);
         const jsonFiles = files.filter(file => path.extname(file) === '.jsonl');
 
@@ -1026,6 +1041,12 @@ router.post('/chats', jsonParser, async function (request, response) {
                 const fileStream = fs.createReadStream(pathToFile);
                 const stats = fs.statSync(pathToFile);
                 const fileSizeInKB = `${(stats.size / 1024).toFixed(2)}kb`;
+
+                if (stats.size === 0) {
+                    console.log(`Found an empty chat file: ${pathToFile}`);
+                    res({});
+                    return;
+                }
 
                 const rl = readline.createInterface({
                     input: fileStream,
@@ -1075,7 +1096,7 @@ router.post('/chats', jsonParser, async function (request, response) {
 /**
  * Gets the name for the uploaded PNG file.
  * @param {string} file File name
- * @param {import('../users').UserDirectoryList} directories User directories
+ * @param {import('../users.js').UserDirectoryList} directories User directories
  * @returns {string} - The name for the uploaded PNG file
  */
 function getPngName(file, directories) {
@@ -1225,5 +1246,3 @@ router.post('/export', jsonParser, async function (request, response) {
         response.sendStatus(500);
     }
 });
-
-module.exports = { router };

@@ -479,11 +479,6 @@
     line-height: 1.2;
 }
 
-.custom-katex-html,
-.katex-html {
-    display: none;
-}
-
 .hoverglow {
     transition: opacity 200ms;
 }
@@ -611,4 +606,8 @@ ul.li-padding-bot5 li {
 
 ul.li-padding-bot10 li {
     padding-bottom: 10px;
+}
+
+.wordBreakAll {
+    word-break: break-all;
 }

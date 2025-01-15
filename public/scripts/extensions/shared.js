@@ -3,6 +3,7 @@ import { extension_settings, openThirdPartyExtensionMenu } from '../extensions.j
 import { oai_settings } from '../openai.js';
 import { SECRET_KEYS, secret_state } from '../secrets.js';
 import { textgen_types, textgenerationwebui_settings } from '../textgen-settings.js';
+import { getTokenCountAsync } from '../tokenizers.js';
 import { createThumbnail, isValidUrl } from '../utils.js';
 
 /**
@@ -36,7 +37,7 @@ export async function getMultimodalCaption(base64Img, prompt) {
     const isVllm = extension_settings.caption.multimodal_api === 'vllm';
     const base64Bytes = base64Img.length * 0.75;
     const compressionLimit = 2 * 1024 * 1024;
-    if ((['google', 'openrouter', 'mistral'].includes(extension_settings.caption.multimodal_api) && base64Bytes > compressionLimit) || isOoba || isKoboldCpp) {
+    if ((['google', 'openrouter', 'mistral', 'groq'].includes(extension_settings.caption.multimodal_api) && base64Bytes > compressionLimit) || isOoba || isKoboldCpp) {
         const maxSide = 1024;
         base64Img = await createThumbnail(base64Img, maxSide, maxSide, 'image/jpeg');
     }
@@ -135,6 +136,10 @@ function throwIfInvalidModel(useReverseProxy) {
         throw new Error('01.AI API key is not set.');
     }
 
+    if (extension_settings.caption.multimodal_api === 'groq' && !secret_state[SECRET_KEYS.GROQ]) {
+        throw new Error('Groq API key is not set.');
+    }
+
     if (extension_settings.caption.multimodal_api === 'google' && !secret_state[SECRET_KEYS.MAKERSUITE] && !useReverseProxy) {
         throw new Error('Google AI Studio API key is not set.');
     }
@@ -231,6 +236,7 @@ export async function generateWebLlmChatPrompt(messages, params = {}) {
 
 /**
  * Counts the number of tokens in the provided text using WebLLM's default model.
+ * Fallbacks to the current model's tokenizer if WebLLM token count fails.
  * @param {string} text Text to count tokens in
  * @returns {Promise<number>} Number of tokens in the text
  */
@@ -239,9 +245,14 @@ export async function countWebLlmTokens(text) {
         throw new Error('WebLLM extension is not installed.');
     }
 
-    const engine = SillyTavern.llm;
-    const response = await engine.countTokens(text);
-    return response;
+    try {
+        const engine = SillyTavern.llm;
+        const response = await engine.countTokens(text);
+        return response;
+    } catch (error) {
+        // Fallback to using current model's tokenizer
+        return await getTokenCountAsync(text);
+    }
 }
 
 /**

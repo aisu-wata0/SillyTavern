@@ -1,16 +1,21 @@
-const fs = require('fs');
-const path = require('path');
-const express = require('express');
-const fetch = require('node-fetch').default;
-const sanitize = require('sanitize-filename');
-const { getConfigValue, color } = require('../util');
-const { jsonParser } = require('../express-common');
-const writeFileAtomicSync = require('write-file-atomic').sync;
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+import { Buffer } from 'node:buffer';
+
+import express from 'express';
+import fetch from 'node-fetch';
+import sanitize from 'sanitize-filename';
+import { sync as writeFileAtomicSync } from  'write-file-atomic';
+
+import { getConfigValue, color } from '../util.js';
+import { jsonParser } from '../express-common.js';
+import { write } from '../character-card-parser.js';
+
 const contentDirectory = path.join(process.cwd(), 'default/content');
 const scaffoldDirectory = path.join(process.cwd(), 'default/scaffold');
 const contentIndexPath = path.join(contentDirectory, 'index.json');
 const scaffoldIndexPath = path.join(scaffoldDirectory, 'index.json');
-const characterCardParser = require('../character-card-parser.js');
 
 const WHITELIST_GENERIC_URL_DOWNLOAD_SOURCES = getConfigValue('whitelistImportDomains', []);
 
@@ -26,7 +31,7 @@ const WHITELIST_GENERIC_URL_DOWNLOAD_SOURCES = getConfigValue('whitelistImportDo
  * @typedef {string} ContentType
  * @enum {string}
  */
-const CONTENT_TYPES = {
+export const CONTENT_TYPES = {
     SETTINGS: 'settings',
     CHARACTER: 'character',
     SPRITES: 'sprites',
@@ -43,20 +48,21 @@ const CONTENT_TYPES = {
     CONTEXT: 'context',
     MOVING_UI: 'moving_ui',
     QUICK_REPLIES: 'quick_replies',
+    SYSPROMPT: 'sysprompt',
 };
 
 /**
  * Gets the default presets from the content directory.
- * @param {import('../users').UserDirectoryList} directories User directories
+ * @param {import('../users.js').UserDirectoryList} directories User directories
  * @returns {object[]} Array of default presets
  */
-function getDefaultPresets(directories) {
+export function getDefaultPresets(directories) {
     try {
         const contentIndex = getContentIndex();
         const presets = [];
 
         for (const contentItem of contentIndex) {
-            if (contentItem.type.endsWith('_preset') || contentItem.type === 'instruct' || contentItem.type === 'context') {
+            if (contentItem.type.endsWith('_preset') || contentItem.type === 'instruct' || contentItem.type === 'context' || contentItem.type === 'sysprompt') {
                 contentItem.name = path.parse(contentItem.filename).name;
                 contentItem.folder = getTargetByType(contentItem.type, directories);
                 presets.push(contentItem);
@@ -75,7 +81,7 @@ function getDefaultPresets(directories) {
  * @param {string} filename Name of the file to get
  * @returns {object | null} JSON object or null if the file doesn't exist
  */
-function getDefaultPresetFile(filename) {
+export function getDefaultPresetFile(filename) {
     try {
         const contentPath = path.join(contentDirectory, filename);
 
@@ -94,7 +100,7 @@ function getDefaultPresetFile(filename) {
 /**
  * Seeds content for a user.
  * @param {ContentItem[]} contentIndex Content index
- * @param {import('../users').UserDirectoryList} directories User directories
+ * @param {import('../users.js').UserDirectoryList} directories User directories
  * @param {string[]} forceCategories List of categories to force check (even if content check is skipped)
  * @returns {Promise<boolean>} Whether any content was added
  */
@@ -153,11 +159,11 @@ async function seedContentForUser(contentIndex, directories, forceCategories) {
 
 /**
  * Checks for new content and seeds it for all users.
- * @param {import('../users').UserDirectoryList[]} directoriesList List of user directories
+ * @param {import('../users.js').UserDirectoryList[]} directoriesList List of user directories
  * @param {string[]} forceCategories List of categories to force check (even if content check is skipped)
  * @returns {Promise<void>}
  */
-async function checkForNewContent(directoriesList, forceCategories = []) {
+export async function checkForNewContent(directoriesList, forceCategories = []) {
     try {
         const contentCheckSkip = getConfigValue('skipContentCheck', false);
         if (contentCheckSkip && forceCategories?.length === 0) {
@@ -218,9 +224,44 @@ function getContentIndex() {
 }
 
 /**
+ * Gets content by type and format.
+ * @param {string} type Type of content
+ * @param {'json'|'string'|'raw'} format Format of content
+ * @returns {string[]|Buffer[]} Array of content
+ */
+export function getContentOfType(type, format) {
+    const contentIndex = getContentIndex();
+    const indexItems = contentIndex.filter((item) => item.type === type && item.folder);
+    const files = [];
+    for (const item of indexItems) {
+        if (!item.folder) {
+            continue;
+        }
+        try {
+            const filePath = path.join(item.folder, item.filename);
+            const fileContent = fs.readFileSync(filePath);
+            switch (format) {
+                case 'json':
+                    files.push(JSON.parse(fileContent.toString()));
+                    break;
+                case 'string':
+                    files.push(fileContent.toString());
+                    break;
+                case 'raw':
+                    files.push(fileContent);
+                    break;
+            }
+        } catch {
+            // Ignore errors
+        }
+    }
+    return files;
+}
+
+/**
  * Gets the target directory for the specified asset type.
  * @param {ContentType} type Asset type
- * @param {import('../users').UserDirectoryList} directories User directories
+ * @param {import('../users.js').UserDirectoryList} directories User directories
  * @returns {string | null} Target directory
  */
 function getTargetByType(type, directories) {
@@ -257,6 +298,8 @@ function getTargetByType(type, directories) {
             return directories.movingUI;
         case CONTENT_TYPES.QUICK_REPLIES:
             return directories.quickreplies;
+        case CONTENT_TYPES.SYSPROMPT:
+            return directories.sysprompt;
         default:
             return null;
     }
@@ -293,7 +336,7 @@ async function downloadChubLorebook(id) {
     }
 
     const name = id.split('/').pop();
-    const buffer = await result.buffer();
+    const buffer = Buffer.from(await result.arrayBuffer());
     const fileName = `${sanitize(name)}.json`;
     const fileType = result.headers.get('content-type');
 
@@ -316,7 +359,7 @@ async function downloadChubCharacter(id) {
         throw new Error('Failed to download character');
     }
 
-    const buffer = await result.buffer();
+    const buffer = Buffer.from(await result.arrayBuffer());
     const fileName = result.headers.get('content-disposition')?.split('filename=')[1] || `${sanitize(id)}.png`;
     const fileType = result.headers.get('content-type');
 
@@ -337,6 +380,7 @@ async function downloadPygmalionCharacter(id) {
         throw new Error('Failed to download character');
     }
 
+    /** @type {any} */
     const jsonData = await result.json();
     const characterData = jsonData?.character;
 
@@ -354,9 +398,9 @@ async function downloadPygmalionCharacter(id) {
         }
 
         const avatarResult = await fetch(avatarUrl);
-        const avatarBuffer = await avatarResult.buffer();
+        const avatarBuffer = Buffer.from(await avatarResult.arrayBuffer());
 
-        const cardBuffer = characterCardParser.write(avatarBuffer, JSON.stringify(characterData));
+        const cardBuffer = write(avatarBuffer, JSON.stringify(characterData));
 
         return {
             buffer: cardBuffer,
@@ -429,10 +473,11 @@ async function downloadJannyCharacter(uuid) {
     });
 
     if (result.ok) {
+        /** @type {any} */
         const downloadResult = await result.json();
         if (downloadResult.status === 'ok') {
             const imageResult = await fetch(downloadResult.downloadUrl);
-            const buffer = await imageResult.buffer();
+            const buffer = Buffer.from(await imageResult.arrayBuffer());
             const fileName = `${sanitize(uuid)}.png`;
             const fileType = imageResult.headers.get('content-type');
 
@@ -454,7 +499,7 @@ async function downloadAICCCharacter(id) {
         }
 
         const contentType = response.headers.get('content-type') || 'image/png'; // Default to 'image/png' if header is missing
-        const buffer = await response.buffer();
+        const buffer = Buffer.from(await response.arrayBuffer());
         const fileName = `${sanitize(id)}.png`; // Assuming PNG, but adjust based on actual content or headers
 
         return {
@@ -492,7 +537,7 @@ async function downloadGenericPng(url) {
         const result = await fetch(url);
 
         if (result.ok) {
-            const buffer = await result.buffer();
+            const buffer = Buffer.from(await result.arrayBuffer());
             const fileName = sanitize(result.url.split('?')[0].split('/').reverse()[0]);
             const contentType = result.headers.get('content-type') || 'image/png'; //yoink it from AICC function lol
 
@@ -536,7 +581,7 @@ async function downloadRisuCharacter(uuid) {
         throw new Error('Failed to download character');
     }
 
-    const buffer = await result.buffer();
+    const buffer = Buffer.from(await result.arrayBuffer());
     const fileName = `${sanitize(uuid)}.png`;
     const fileType = 'image/png';
 
@@ -580,7 +625,7 @@ function isHostWhitelisted(host) {
     return WHITELIST_GENERIC_URL_DOWNLOAD_SOURCES.includes(host);
 }
 
-const router = express.Router();
+export const router = express.Router();
 
 router.post('/importURL', jsonParser, async (request, response) => {
     if (!request.body.url) {
@@ -715,11 +760,3 @@ router.post('/importUUID', jsonParser, async (request, response) => {
         return response.sendStatus(500);
     }
 });
-
-module.exports = {
-    CONTENT_TYPES,
-    checkForNewContent,
-    getDefaultPresets,
-    getDefaultPresetFile,
-    router,
-};
