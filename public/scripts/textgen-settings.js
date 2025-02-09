@@ -172,6 +172,7 @@ const settings = {
     //truncation_length: 2048,
     ban_eos_token: false,
     skip_special_tokens: true,
+    include_reasoning: true,
     streaming: false,
     mirostat_mode: 0,
     mirostat_tau: 5,
@@ -263,6 +264,7 @@ export const setting_names = [
     'add_bos_token',
     'ban_eos_token',
     'skip_special_tokens',
+    'include_reasoning',
     'streaming',
     'mirostat_mode',
     'mirostat_tau',
@@ -501,7 +503,7 @@ export function loadTextGenSettings(data, loadedSettings) {
     for (const [type, selector] of Object.entries(SERVER_INPUTS)) {
         const control = $(selector);
         control.val(settings.server_urls[type] ?? '').on('input', function () {
-            settings.server_urls[type] = String($(this).val());
+            settings.server_urls[type] = String($(this).val()).trim();
             saveSettingsDebounced();
         });
     }
@@ -740,6 +742,7 @@ jQuery(function () {
             'add_bos_token_textgenerationwebui': true,
             'temperature_last_textgenerationwebui': true,
             'skip_special_tokens_textgenerationwebui': true,
+            'include_reasoning_textgenerationwebui': true,
             'top_a_textgenerationwebui': 0,
             'top_a_counter_textgenerationwebui': 0,
             'mirostat_mode_textgenerationwebui': 0,
@@ -986,6 +989,7 @@ export async function generateTextGenWithStreaming(generate_data, signal) {
         let logprobs = null;
         const swipes = [];
         const toolCalls = [];
+        const state = { reasoning: '' };
         while (true) {
             const { done, value } = await reader.read();
             if (done) return;
@@ -1002,9 +1006,10 @@ export async function generateTextGenWithStreaming(generate_data, signal) {
                 const newText = data?.choices?.[0]?.text || data?.content || '';
                 text += newText;
                 logprobs = parseTextgenLogprobs(newText, data.choices?.[0]?.logprobs || data?.completion_probabilities);
+                state.reasoning += data?.choices?.[0]?.reasoning ?? '';
             }
 
-            yield { text, swipes, logprobs, toolCalls };
+            yield { text, swipes, logprobs, toolCalls, state };
         }
     };
 }
@@ -1216,7 +1221,7 @@ function replaceMacrosInList(str) {
     }
 }
 
-export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, isContinue, cfgValues, type) {
+export async function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, isContinue, cfgValues, type) {
     const canMultiSwipe = !isContinue && !isImpersonate && type !== 'quiet';
     const dynatemp = isDynamicTemperatureSupported();
     const { banned_tokens, banned_strings } = getCustomTokenBans();
@@ -1231,7 +1236,7 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
         'top_p': settings.top_p,
         'typical_p': settings.typical_p,
         'typical': settings.typical_p,
-        'sampler_seed': settings.seed,
+        'sampler_seed': settings.seed >= 0 ? settings.seed : undefined,
         'min_p': settings.min_p,
         'repetition_penalty': settings.rep_pen,
         'frequency_penalty': settings.freq_pen,
@@ -1265,6 +1270,7 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
         'truncation_length': max_context,
         'ban_eos_token': settings.ban_eos_token,
         'skip_special_tokens': settings.skip_special_tokens,
+        'include_reasoning': settings.include_reasoning,
         'top_a': settings.top_a,
         'tfs': settings.tfs,
         'epsilon_cutoff': [OOBA, MANCER].includes(settings.type) ? settings.epsilon_cutoff : undefined,
@@ -1294,7 +1300,7 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
         'temperature_last': (settings.type === OOBA || settings.type === APHRODITE || settings.type == TABBY) ? settings.temperature_last : undefined,
         'speculative_ngram': settings.type === TABBY ? settings.speculative_ngram : undefined,
         'do_sample': settings.type === OOBA ? settings.do_sample : undefined,
-        'seed': settings.seed,
+        'seed': settings.seed >= 0 ? settings.seed : undefined,
         'guidance_scale': cfgValues?.guidanceScale?.value ?? settings.guidance_scale ?? 1,
         'negative_prompt': cfgValues?.negativePrompt ?? substituteParams(settings.negative_prompt) ?? '',
         'grammar_string': settings.grammar_string,
@@ -1443,7 +1449,7 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
         }
     }
 
-    eventSource.emitAndWait(event_types.TEXT_COMPLETION_SETTINGS_READY, params);
+    await eventSource.emit(event_types.TEXT_COMPLETION_SETTINGS_READY, params);
 
     // Grammar conflicts with with json_schema
     if (settings.type === LLAMACPP) {

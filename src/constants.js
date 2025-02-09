@@ -139,19 +139,19 @@ export const UNSAFE_EXTENSIONS = [
 export const GEMINI_SAFETY = [
     {
         category: 'HARM_CATEGORY_HARASSMENT',
-        threshold: 'BLOCK_NONE',
+        threshold: 'OFF',
     },
     {
         category: 'HARM_CATEGORY_HATE_SPEECH',
-        threshold: 'BLOCK_NONE',
+        threshold: 'OFF',
     },
     {
         category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-        threshold: 'BLOCK_NONE',
+        threshold: 'OFF',
     },
     {
         category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-        threshold: 'BLOCK_NONE',
+        threshold: 'OFF',
     },
     {
         category: 'HARM_CATEGORY_CIVIC_INTEGRITY',
@@ -369,6 +369,7 @@ export const OPENROUTER_KEYS = [
     'prompt',
     'stop',
     'provider',
+    'include_reasoning',
 ];
 
 // https://github.com/vllm-project/vllm/blob/0f8a91401c89ac0a8018def3756829611b57727f/vllm/entrypoints/openai/protocol.py#L220
@@ -413,3 +414,10 @@ export const VLLM_KEYS = [
     'guided_decoding_backend',
     'guided_whitespace_pattern',
 ];
+
+export const LOG_LEVELS = {
+    DEBUG: 0,
+    INFO: 1,
+    WARN: 2,
+    ERROR: 3,
+};

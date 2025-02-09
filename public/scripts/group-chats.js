@@ -81,6 +81,7 @@ import { t } from './i18n.js';
 
 export {
     selected_group,
+    openGroupId,
     is_group_automode_enabled,
     hideMutedSprites,
     is_group_generating,
@@ -291,10 +292,11 @@ export function getGroupNames() {
 
 /**
  * Finds the character ID for a group member.
- * @param {string} arg 0-based member index or character name
- * @returns {number} 0-based character ID
+ * @param {number|string} arg 0-based member index or character name
+ * @param {Boolean} full Whether to return a key-value object containing extra data
+ * @returns {number|Object} 0-based character ID or key-value object if full is true
  */
-export function findGroupMemberId(arg) {
+export function findGroupMemberId(arg, full = false) {
     arg = arg?.trim();
 
     if (!arg) {
@@ -310,15 +312,19 @@ export function findGroupMemberId(arg) {
     }
 
     const index = parseInt(arg);
-    const searchByName = isNaN(index);
+    const searchByString = isNaN(index);
 
-    if (searchByName) {
-        const memberNames = group.members.map(x => ({ name: characters.find(y => y.avatar === x)?.name, index: characters.findIndex(y => y.avatar === x) }));
-        const fuse = new Fuse(memberNames, { keys: ['name'] });
+    if (searchByString) {
+        const memberNames = group.members.map(x => ({
+            avatar: x,
+            name: characters.find(y => y.avatar === x)?.name,
+            index: characters.findIndex(y => y.avatar === x),
+        }));
+        const fuse = new Fuse(memberNames, { keys: ['avatar', 'name'] });
         const result = fuse.search(arg);
 
         if (!result.length) {
-            console.warn(`WARN: No group member found with name ${arg}`);
+            console.warn(`WARN: No group member found using string ${arg}`);
             return;
         }
 
@@ -329,9 +335,11 @@ export function findGroupMemberId(arg) {
             return;
         }
 
-        console.log(`Triggering group member ${chid} (${arg}) from search result`, result[0]);
-        return chid;
-    } else {
+        console.log(`Targeting group member ${chid} (${arg}) from search result`, result[0]);
+
+        return !full ? chid : { ...{ id: chid }, ...result[0].item };
+    }
+    else {
         const memberAvatar = group.members[index];
 
         if (memberAvatar === undefined) {
@@ -346,8 +354,14 @@ export function findGroupMemberId(arg) {
             return;
         }
 
-        console.log(`Triggering group member ${memberAvatar} at index ${index}`);
-        return chid;
+        console.log(`Targeting group member ${memberAvatar} at index ${index}`);
+
+        return !full ? chid : {
+            id: chid,
+            avatar: memberAvatar,
+            name: characters.find(y => y.avatar === memberAvatar)?.name,
+            index: index,
+        };
     }
 }
 
@@ -804,7 +818,6 @@ async function generateGroupWrapper(by_auto_mode, type = null, params = {}) {
 
     /** @type {any} Caution: JS war crimes ahead */
     let textResult = '';
-    let typingIndicator = $('#chat .typing_indicator');
     const group = groups.find((x) => x.id === selected_group);
 
     if (!group || !Array.isArray(group.members) || !group.members.length) {
@@ -819,14 +832,6 @@ async function generateGroupWrapper(by_auto_mode, type = null, params = {}) {
         setCharacterName('');
         setCharacterId(undefined);
         const userInput = String($('#send_textarea').val());
-
-        if (typingIndicator.length === 0 && !isStreamingEnabled()) {
-            typingIndicator = $(
-                '#typing_indicator_template .typing_indicator',
-            ).clone();
-            typingIndicator.hide();
-            $('#chat').append(typingIndicator);
-        }
 
         // id of this specific batch for regeneration purposes
         group_generation_id = Date.now();
@@ -905,14 +910,6 @@ async function generateGroupWrapper(by_auto_mode, type = null, params = {}) {
             }
             await eventSource.emit(event_types.GROUP_MEMBER_DRAFTED, chId);
 
-            if (type !== 'swipe' && type !== 'impersonate' && !isStreamingEnabled()) {
-                // update indicator and scroll down
-                typingIndicator
-                    .find('.typing_indicator_name')
-                    .text(characters[chId].name);
-                typingIndicator.show();
-            }
-
             // Wait for generation to finish
             textResult = await Generate(generateType, { automatic_trigger: by_auto_mode, ...(params || {}) });
             let messageChunk = textResult?.messageChunk;
@@ -929,8 +926,6 @@ async function generateGroupWrapper(by_auto_mode, type = null, params = {}) {
             }
         }
     } finally {
-        typingIndicator.hide();
-
         is_group_generating = false;
         setSendButtonState(false);
         setCharacterId(undefined);
@@ -1366,6 +1361,15 @@ function getGroupCharacterBlock(character) {
     template.attr('chid', characters.indexOf(character));
     template.find('.ch_fav').val(isFav);
     template.toggleClass('is_fav', isFav);
+
+    const auxFieldName = power_user.aux_field || 'character_version';
+    const auxFieldValue = (character.data && character.data[auxFieldName]) || '';
+    if (auxFieldValue) {
+        template.find('.character_version').text(auxFieldValue);
+    }
+    else {
+        template.find('.character_version').hide();
+    }
 
     let queuePosition = groupChatQueueOrder.get(character.avatar);
     if (queuePosition) {

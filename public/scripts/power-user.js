@@ -256,6 +256,16 @@ let power_user = {
         content: 'Write {{char}}\'s next reply in a fictional chat between {{char}} and {{user}}.',
     },
 
+    reasoning: {
+        auto_parse: false,
+        add_to_prompts: false,
+        auto_expand: false,
+        prefix: '<think>\n',
+        suffix: '\n</think>',
+        separator: '\n\n',
+        max_additions: 1,
+    },
+
     personas: {},
     default_persona: null,
     persona_descriptions: {},
@@ -2447,7 +2457,7 @@ async function resetMovablePanels(type) {
     }
 
     saveSettingsDebounced();
-    eventSource.emit(event_types.MOVABLE_PANELS_RESET);
+    await eventSource.emit(event_types.MOVABLE_PANELS_RESET);
 
     eventSource.once(event_types.SETTINGS_UPDATED, () => {
         $('.resizing').removeClass('resizing');
@@ -2540,7 +2550,7 @@ async function loadUntilMesId(mesId) {
     let target;
 
     while (getFirstDisplayedMessageId() > mesId && getFirstDisplayedMessageId() !== 0) {
-        showMoreMessages();
+        await showMoreMessages();
         await delay(1);
         target = $('#chat').find(`.mes[mesid=${mesId}]`);
 
@@ -2912,6 +2922,46 @@ export function flushEphemeralStoppingStrings() {
 
     console.debug('Flushing ephemeral stopping strings:', EPHEMERAL_STOPPING_STRINGS);
     EPHEMERAL_STOPPING_STRINGS.splice(0, EPHEMERAL_STOPPING_STRINGS.length);
+}
+
+/**
+ * Checks if the generated text should be filtered based on the auto-swipe settings.
+ * @param {string} text The text to check
+ * @returns {boolean} If the generated text should be filtered
+ */
+export function generatedTextFiltered(text) {
+    /**
+     * Checks if the given text contains any of the blacklisted words.
+     * @param {string} text The text to check
+     * @param {string[]} blacklist The list of blacklisted words
+     * @param {number} threshold The number of blacklisted words that need to be present to trigger the check
+     * @returns {boolean} Whether the text contains blacklisted words
+     */
+    function containsBlacklistedWords(text, blacklist, threshold) {
+        const regex = new RegExp(`\\b(${blacklist.join('|')})\\b`, 'gi');
+        const matches = text.match(regex) || [];
+        return matches.length >= threshold;
+    }
+
+    // Make sure a generated text is non-empty
+    // Otherwise we might get in a loop with a broken API
+    text = text.trim();
+    if (text.length > 0) {
+        if (power_user.auto_swipe_minimum_length) {
+            if (text.length < power_user.auto_swipe_minimum_length) {
+                console.log('Generated text size too small');
+                return true;
+            }
+        }
+        if (power_user.auto_swipe_blacklist.length && power_user.auto_swipe_blacklist_threshold) {
+            if (containsBlacklistedWords(text, power_user.auto_swipe_blacklist, power_user.auto_swipe_blacklist_threshold)) {
+                console.log('Generated text has blacklisted words');
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 /**
@@ -3890,9 +3940,9 @@ $(document).ready(() => {
         helpString: 'Start a new chat with a random character. If an argument is provided, only considers characters that have the specified tag.',
     }));
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-        name: 'delmode',
+        name: 'del',
         callback: doDelMode,
-        aliases: ['del'],
+        aliases: ['delete', 'delmode'],
         unnamedArgumentList: [
             new SlashCommandArgument(
                 'optional number', [ARGUMENT_TYPE.NUMBER], false,
@@ -4074,5 +4124,46 @@ $(document).ready(() => {
             }),
         ],
         helpString: 'activates a movingUI preset by name',
+    }));
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'stop-strings',
+        aliases: ['stopping-strings', 'custom-stopping-strings', 'custom-stop-strings'],
+        helpString: `
+            <div>
+                Sets a list of custom stopping strings. Gets the list if no value is provided.
+            </div>
+            <div>
+                <strong>Examples:</strong>
+            </div>
+            <ul>
+                <li>Value must be a JSON-serialized array: <pre><code class="language-stscript">/stop-strings ["goodbye", "farewell"]</code></pre></li>
+                <li>Pipe characters must be escaped with a backslash: <pre><code class="language-stscript">/stop-strings ["left\\|right"]</code></pre></li>
+            </ul>
+        `,
+        returns: ARGUMENT_TYPE.LIST,
+        unnamedArgumentList: [
+            SlashCommandArgument.fromProps({
+                description: 'list of strings',
+                typeList: [ARGUMENT_TYPE.LIST],
+                acceptsMultiple: false,
+                isRequired: false,
+            }),
+        ],
+        callback: (_, value) => {
+            if (String(value ?? '').trim()) {
+                const parsedValue = ((x) => { try { return JSON.parse(x.toString()); } catch { return null; } })(value);
+                if (!parsedValue || !Array.isArray(parsedValue)) {
+                    throw new Error('Invalid list format. The value must be a JSON-serialized array of strings.');
+                }
+                parsedValue.forEach((item, index) => {
+                    parsedValue[index] = String(item);
+                });
+                power_user.custom_stopping_strings = JSON.stringify(parsedValue);
+                $('#custom_stopping_strings').val(power_user.custom_stopping_strings);
+                saveSettingsDebounced();
+            }
+
+            return power_user.custom_stopping_strings;
+        },
     }));
 });

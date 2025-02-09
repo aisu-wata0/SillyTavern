@@ -52,6 +52,7 @@ export const SECRET_KEYS = {
     BFL: 'api_key_bfl',
     GENERIC: 'api_key_generic',
     DEEPSEEK: 'api_key_deepseek',
+    SERPER: 'api_key_serper',
 };
 
 // These are the keys that are safe to expose, even if allowKeysExposure is false
@@ -151,7 +152,7 @@ export function getAllSecrets(directories) {
     const filePath = path.join(directories.root, SECRETS_FILE);
 
     if (!fs.existsSync(filePath)) {
-        console.log('Secrets file does not exist');
+        console.error('Secrets file does not exist');
         return undefined;
     }
 

@@ -388,7 +388,7 @@ class AllTalkTtsProvider {
     }
 
     async fetchRvcVoiceObjects() {
-        if (this.settings.server_version == 'v2') {
+        if (this.settings.server_version == 'v1') {
             console.log('Skipping RVC voices fetch for V1 server');
             return [];
         }
@@ -1031,14 +1031,18 @@ class AllTalkTtsProvider {
                 console.error('fetchTtsGeneration Error Response Text:', errorText);
                 throw new Error(`HTTP ${response.status}: ${errorText}`);
             }
+
             const data = await response.json();
 
-            // Handle V1/V2 URL differences
-            const outputUrl = this.settings.server_version === 'v1'
-                ? data.output_file_url  // V1 returns full URL
-                : `${this.settings.provider_endpoint}${data.output_file_url}`; // V2 returns relative path
+            // V1 returns a complete URL, V2 returns a relative path
+            if (this.settings.server_version === 'v1') {
+                // V1: Use the complete URL directly from the response
+                return data.output_file_url;
+            } else {
+                // V2: Combine the endpoint with the relative path
+                return `${this.settings.provider_endpoint}${data.output_file_url}`;
+            }
 
-            return outputUrl;
         } catch (error) {
             console.error('[fetchTtsGeneration] Exception caught:', error);
             throw error;

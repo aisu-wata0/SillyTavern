@@ -40,6 +40,7 @@ export const SECRET_KEYS = {
     BFL: 'api_key_bfl',
     GENERIC: 'api_key_generic',
     DEEPSEEK: 'api_key_deepseek',
+    SERPER: 'api_key_serper',
 };
 
 const INPUT_MAP = {

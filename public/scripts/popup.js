@@ -24,6 +24,15 @@ export const POPUP_RESULT = {
     AFFIRMATIVE: 1,
     NEGATIVE: 0,
     CANCELLED: null,
+    CUSTOM1: 1001,
+    CUSTOM2: 1002,
+    CUSTOM3: 1003,
+    CUSTOM4: 1004,
+    CUSTOM5: 1005,
+    CUSTOM6: 1006,
+    CUSTOM7: 1007,
+    CUSTOM8: 1008,
+    CUSTOM9: 1009,
 };
 
 /**

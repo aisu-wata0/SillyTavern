@@ -400,6 +400,12 @@ class WorldInfoTimedEffects {
     #entries = [];
 
     /**
+     * Is this a dry run?
+     * @type {boolean}
+     */
+    #isDryRun = false;
+
+    /**
      * Buffer for active timed effects.
      * @type {Record<TimedEffectType, WIScanEntry[]>}
      */
@@ -448,10 +454,12 @@ class WorldInfoTimedEffects {
      * Initialize the timed effects with the given messages.
      * @param {string[]} chat Array of chat messages
      * @param {WIScanEntry[]} entries Array of entries
+     * @param {boolean} isDryRun Whether the operation is a dry run
      */
-    constructor(chat, entries) {
+    constructor(chat, entries, isDryRun = false) {
         this.#chat = chat;
         this.#entries = entries;
+        this.#isDryRun = isDryRun;
         this.#ensureChatMetadata();
     }
 
@@ -583,8 +591,10 @@ class WorldInfoTimedEffects {
      * Checks for timed effects on chat messages.
      */
     checkTimedEffects() {
-        this.#checkTimedEffectOfType('sticky', this.#buffer.sticky, this.#onEnded.sticky.bind(this));
-        this.#checkTimedEffectOfType('cooldown', this.#buffer.cooldown, this.#onEnded.cooldown.bind(this));
+        if (!this.#isDryRun) {
+            this.#checkTimedEffectOfType('sticky', this.#buffer.sticky, this.#onEnded.sticky.bind(this));
+            this.#checkTimedEffectOfType('cooldown', this.#buffer.cooldown, this.#onEnded.cooldown.bind(this));
+        }
         this.#checkDelayEffect(this.#buffer.delay);
     }
 
@@ -629,6 +639,7 @@ class WorldInfoTimedEffects {
      * @param {WIScanEntry[]} activatedEntries Entries that were activated
      */
     setTimedEffects(activatedEntries) {
+        if (this.#isDryRun) return;
         for (const entry of activatedEntries) {
             this.#setTimedEffectOfType('sticky', entry);
             this.#setTimedEffectOfType('cooldown', entry);
@@ -643,6 +654,9 @@ class WorldInfoTimedEffects {
      */
     setTimedEffect(type, entry, newState) {
         if (!this.isValidEffectType(type)) {
+            return;
+        }
+        if (this.#isDryRun && type !== 'delay') {
             return;
         }
 
@@ -1708,7 +1722,7 @@ export async function loadWorldInfo(name) {
     return null;
 }
 
-async function updateWorldInfoList() {
+export async function updateWorldInfoList() {
     const result = await fetch('/api/settings/get', {
         method: 'POST',
         headers: getRequestHeaders(),
@@ -2423,7 +2437,9 @@ export async function getWorldEntry(name, data, entry) {
                     setWIOriginalDataValue(data, uid, originalDataValueName, data.entries[uid][entryPropName]);
                     await saveWorldInfo(name, data);
                 }
+                $(this).toggleClass('empty', !data.entries[uid][entryPropName].length);
             });
+            input.toggleClass('empty', !entry[entryPropName].length);
             input.on('select2:select', /** @type {function(*):void} */ event => updateWorldEntryKeyOptionsCache([event.params.data]));
             input.on('select2:unselect', /** @type {function(*):void} */ event => updateWorldEntryKeyOptionsCache([event.params.data], { remove: true }));
 
@@ -2458,6 +2474,7 @@ export async function getWorldEntry(name, data, entry) {
                     data.entries[uid][entryPropName] = splitKeywordsAndRegexes(value);
                     setWIOriginalDataValue(data, uid, originalDataValueName, data.entries[uid][entryPropName]);
                     await saveWorldInfo(name, data);
+                    $(this).toggleClass('empty', !data.entries[uid][entryPropName].length);
                 }
             });
             input.val(entry[entryPropName].join(', ')).trigger('input', { skipReset: true });
@@ -3435,7 +3452,7 @@ async function _save(name, data) {
         headers: getRequestHeaders(),
         body: JSON.stringify({ name: name, data: data }),
     });
-    eventSource.emit(event_types.WORLDINFO_UPDATED, name, data);
+    await eventSource.emit(event_types.WORLDINFO_UPDATED, name, data);
 }
 
 
@@ -3847,7 +3864,7 @@ export async function checkWorldInfo(chat, maxContext, isDryRun) {
     const context = getContext();
     const buffer = new WorldInfoBuffer(chat);
 
-    console.debug(`[WI] --- START WI SCAN (on ${chat.length} messages) ---`);
+    console.debug(`[WI] --- START WI SCAN (on ${chat.length} messages)${isDryRun ? ' (DRY RUN)' : ''} ---`);
 
     // Combine the chat
 
@@ -3879,9 +3896,9 @@ export async function checkWorldInfo(chat, maxContext, isDryRun) {
 
     console.debug(`[WI] Context size: ${maxContext}; WI budget: ${budget} (max% = ${world_info_budget}%, cap = ${world_info_budget_cap})`);
     const sortedEntries = await getSortedEntries();
-    const timedEffects = new WorldInfoTimedEffects(chat, sortedEntries);
+    const timedEffects = new WorldInfoTimedEffects(chat, sortedEntries, isDryRun);
 
-    !isDryRun && timedEffects.checkTimedEffects();
+    timedEffects.checkTimedEffects();
 
     if (sortedEntries.length === 0) {
         return { worldInfoBefore: '', worldInfoAfter: '', WIDepthEntries: [], EMEntries: [], allActivatedEntries: new Set() };
@@ -4324,12 +4341,12 @@ export async function checkWorldInfo(chat, maxContext, isDryRun) {
         context.setExtensionPrompt(NOTE_MODULE_NAME, ANWithWI, chat_metadata[metadata_keys.position], chat_metadata[metadata_keys.depth], extension_settings.note.allowWIScan, chat_metadata[metadata_keys.role]);
     }
 
-    !isDryRun && timedEffects.setTimedEffects(Array.from(allActivatedEntries.values()));
+    timedEffects.setTimedEffects(Array.from(allActivatedEntries.values()));
     buffer.resetExternalEffects();
     timedEffects.cleanUp();
 
-    console.log(`[WI] Adding ${allActivatedEntries.size} entries to prompt`, Array.from(allActivatedEntries.values()));
-    console.debug('[WI] --- DONE ---');
+    console.log(`[WI] ${isDryRun ? 'Hypothetically adding' : 'Adding'} ${allActivatedEntries.size} entries to prompt`, Array.from(allActivatedEntries.values()));
+    console.debug(`[WI] --- DONE${isDryRun ? ' (DRY RUN)' : ''} ---`);
 
     return { worldInfoBefore, worldInfoAfter, EMEntries, WIDepthEntries, allActivatedEntries: new Set(allActivatedEntries.values()) };
 }
@@ -4658,7 +4675,7 @@ function convertNovelLorebook(inputObj) {
     return outputObj;
 }
 
-function convertCharacterBook(characterBook) {
+export function convertCharacterBook(characterBook) {
     const result = { entries: {}, originalData: characterBook };
 
     characterBook.entries.forEach((entry, index) => {

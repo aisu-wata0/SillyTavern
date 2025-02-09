@@ -1116,12 +1116,19 @@ export function initRossMods() {
         // Ctrl+Enter for Regeneration Last Response. If editing, accept the edits instead
         if (event.ctrlKey && event.key == 'Enter') {
             const editMesDone = $('.mes_edit_done:visible');
+            const reasoningMesDone = $('.mes_reasoning_edit_done:visible');
             if (editMesDone.length > 0) {
                 console.debug('Accepting edits with Ctrl+Enter');
-                $('#send_textarea').focus();
+                $('#send_textarea').trigger('focus');
                 editMesDone.trigger('click');
                 return;
-            } else if (is_send_press == false) {
+            } else if (reasoningMesDone.length > 0) {
+                console.debug('Accepting edits with Ctrl+Enter');
+                $('#send_textarea').trigger('focus');
+                reasoningMesDone.trigger('click');
+                return;
+            }
+            else if (is_send_press == false) {
                 const skipConfirmKey = 'RegenerateWithCtrlEnter';
                 const skipConfirm = LoadLocalBool(skipConfirmKey);
                 function doRegenerate() {
@@ -1135,7 +1142,9 @@ export function initRossMods() {
                     let regenerateWithCtrlEnter = false;
                     const result = await Popup.show.confirm('Regenerate Message', 'Are you sure you want to regenerate the latest message?', {
                         customInputs: [{ id: 'regenerateWithCtrlEnter', label: 'Don\'t ask again' }],
-                        onClose: (popup) => regenerateWithCtrlEnter = popup.inputResults.get('regenerateWithCtrlEnter') ?? false,
+                        onClose: (popup) => {
+                            regenerateWithCtrlEnter = popup.inputResults.get('regenerateWithCtrlEnter') ?? false;
+                        },
                     });
                     if (!result) {
                         return;

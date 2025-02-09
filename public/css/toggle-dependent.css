@@ -472,6 +472,11 @@ label[for="trim_spaces"]:has(input:checked) i.warning {
     display: none;
 }
 
+label[for="trim_spaces"]:not(:has(input:checked)) small {
+    color: var(--warning);
+    opacity: 1;
+}
+
 #claude_function_prefill_warning {
     display: none;
     color: red;
